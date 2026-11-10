@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Packaging output (see packaging/build.sh)
+build/
+dist/
+
+# Local test output
+capture.json

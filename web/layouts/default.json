@@ -1,0 +1,196 @@
+{
+  "format": 1,
+  "name": "Default",
+  "width": 1200,
+  "height": 420,
+  "scaleMode": "max",
+  "scalePercent": 100,
+  "widgets": [
+    {
+      "id": "roundGauge-1",
+      "type": "roundGauge",
+      "x": 20,
+      "y": 20,
+      "w": 380,
+      "h": 380,
+      "channel": "wheelspeed",
+      "kind": "speed",
+      "label": "SPEED",
+      "min": 0,
+      "max": {
+        "kmh": 240,
+        "mph": 150
+      },
+      "majorStep": {
+        "kmh": 40,
+        "mph": 20
+      },
+      "minorDiv": 4,
+      "redFrom": 0.92
+    },
+    {
+      "id": "roundGauge-2",
+      "type": "roundGauge",
+      "x": 800,
+      "y": 20,
+      "w": 380,
+      "h": 380,
+      "channel": "rpm",
+      "label": "RPM x1000",
+      "min": 0,
+      "maxChannel": "maxrpm",
+      "maxRound": 1000,
+      "majorStep": 1000,
+      "minorDiv": 2,
+      "labelDiv": 1000,
+      "redFrom": 0.85
+    },
+    {
+      "id": "gear-1",
+      "type": "gear",
+      "x": 450,
+      "y": 25,
+      "w": 300,
+      "h": 190,
+      "channel": "gear"
+    },
+    {
+      "id": "bar-1",
+      "type": "bar",
+      "x": 430,
+      "y": 235,
+      "w": 340,
+      "h": 30,
+      "label": "Fuel",
+      "channel": "fuel",
+      "kind": "fraction",
+      "min": 0,
+      "max": 100,
+      "invert": true,
+      "warnFrom": 20,
+      "critFrom": 8
+    },
+    {
+      "id": "bar-2",
+      "type": "bar",
+      "x": 430,
+      "y": 275,
+      "w": 340,
+      "h": 30,
+      "label": "Water",
+      "channel": "watertemp",
+      "kind": "temp",
+      "min": {
+        "c": 40,
+        "f": 100
+      },
+      "max": {
+        "c": 130,
+        "f": 270
+      },
+      "warnFrom": {
+        "c": 105,
+        "f": 220
+      },
+      "critFrom": {
+        "c": 115,
+        "f": 240
+      }
+    },
+    {
+      "id": "bar-3",
+      "type": "bar",
+      "x": 430,
+      "y": 315,
+      "w": 340,
+      "h": 30,
+      "label": "Oil",
+      "channel": "oiltemp",
+      "kind": "temp",
+      "min": {
+        "c": 40,
+        "f": 100
+      },
+      "max": {
+        "c": 150,
+        "f": 300
+      },
+      "warnFrom": {
+        "c": 125,
+        "f": 260
+      },
+      "critFrom": {
+        "c": 140,
+        "f": 285
+      }
+    },
+    {
+      "id": "light-1",
+      "type": "light",
+      "x": 430,
+      "y": 362,
+      "w": 48,
+      "h": 40,
+      "channel": "signal_L",
+      "arrow": "left",
+      "color": "var(--ok)"
+    },
+    {
+      "id": "light-2",
+      "type": "light",
+      "x": 488,
+      "y": 362,
+      "w": 48,
+      "h": 40,
+      "channel": "parkingbrake",
+      "text": "P",
+      "color": "var(--crit)"
+    },
+    {
+      "id": "light-3",
+      "type": "light",
+      "x": 546,
+      "y": 362,
+      "w": 48,
+      "h": 40,
+      "channels": [
+        "absActive"
+      ],
+      "text": "ABS",
+      "color": "var(--warn)"
+    },
+    {
+      "id": "light-4",
+      "type": "light",
+      "x": 604,
+      "y": 362,
+      "w": 48,
+      "h": 40,
+      "channel": "checkengine",
+      "text": "ENG",
+      "color": "var(--warn)"
+    },
+    {
+      "id": "light-5",
+      "type": "light",
+      "x": 662,
+      "y": 362,
+      "w": 48,
+      "h": 40,
+      "channel": "highbeam",
+      "text": "HI",
+      "color": "var(--accent)"
+    },
+    {
+      "id": "light-6",
+      "type": "light",
+      "x": 720,
+      "y": 362,
+      "w": 48,
+      "h": 40,
+      "channel": "signal_R",
+      "arrow": "right",
+      "color": "var(--ok)"
+    }
+  ]
+}

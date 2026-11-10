@@ -1,0 +1,2 @@
+# Only for building the packaged app (see packaging/build.sh); the running app needs just requirements.txt.
+pyinstaller>=6.6

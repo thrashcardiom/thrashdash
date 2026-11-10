@@ -1,0 +1,20 @@
+:root { color-scheme: dark; }
+body { margin: 0; background: #0d0f12; color: #cfd6df; font: 14px "Segoe UI", system-ui, sans-serif; padding: 18px 24px 40px; }
+.pv-head { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+.pv-head h1 { margin: 0; font-size: 20px; }
+.pv-head p { margin: 0; color: #8793a3; flex: 1; }
+#pv-toggle { padding: 5px 14px; border-radius: 14px; border: 1px solid #2a3340; background: #151a21; color: #cfd6df; cursor: pointer; }
+.pv-skin { margin-top: 26px; }
+.pv-skin h2 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: #8793a3; font-weight: 600; }
+.pv-panel {
+  display: grid; grid-template-columns: 260px 260px 128px 128px; grid-template-rows: 128px 128px auto; gap: 14px 16px; align-items: center; justify-items: center;
+  width: max-content; padding: 22px 26px 18px; border-radius: 14px;
+  background: radial-gradient(circle at 30% 20%, #1d2024, #0a0b0d 70%), #0a0b0d; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), inset 0 0 0 1px #20242a;
+}
+.pv-big { width: 260px; height: 260px; grid-row: 1 / span 2; }
+.pv-small { width: 128px; height: 128px; }
+.pv-row { grid-column: 1 / -1; width: 100%; display: flex; gap: 22px; align-items: center; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid #1c2128; }
+.pv-lamps { display: flex; gap: 8px; }
+.pv-lamp { width: 36px; height: 36px; }
+.pv-bar { width: 220px; height: 22px; }
+.pv-note { color: #8793a3; font-size: 12px; margin-left: auto; }

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ThrashDash
+GenericName=BeamNG.drive dashboard
+Comment=Live gauges for BeamNG.drive in their own window
+Exec=AppRun
+Icon=thrashdash
+Terminal=false
+Categories=Game;

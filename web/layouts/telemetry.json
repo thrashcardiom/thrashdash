@@ -1,0 +1,170 @@
+{
+  "format": 1,
+  "name": "Telemetry (graphs)",
+  "width": 1400,
+  "height": 700,
+  "scaleMode": "max",
+  "scalePercent": 100,
+  "widgets": [
+    {
+      "id": "readout-1",
+      "type": "readout",
+      "x": 20,
+      "y": 20,
+      "w": 330,
+      "h": 100,
+      "channel": "wheelspeed",
+      "kind": "speed",
+      "label": "SPEED",
+      "decimals": 0,
+      "digits": 3
+    },
+    {
+      "id": "readout-2",
+      "type": "readout",
+      "x": 365,
+      "y": 20,
+      "w": 330,
+      "h": 100,
+      "channel": "rpm",
+      "label": "RPM",
+      "decimals": 0,
+      "digits": 5
+    },
+    {
+      "id": "gear-1",
+      "type": "gear",
+      "x": 710,
+      "y": 20,
+      "w": 200,
+      "h": 100,
+      "channel": "gear",
+      "label": "",
+      "style": "digit"
+    },
+    {
+      "id": "readout-3",
+      "type": "readout",
+      "x": 925,
+      "y": 20,
+      "w": 215,
+      "h": 100,
+      "channel": "fuel",
+      "kind": "fraction",
+      "label": "FUEL",
+      "decimals": 0,
+      "digits": 3
+    },
+    {
+      "id": "readout-4",
+      "type": "readout",
+      "x": 1155,
+      "y": 20,
+      "w": 225,
+      "h": 100,
+      "channel": "watertemp",
+      "kind": "temp",
+      "label": "WATER",
+      "decimals": 0,
+      "digits": 3
+    },
+    {
+      "id": "graph-1",
+      "type": "graph",
+      "x": 20,
+      "y": 140,
+      "w": 445,
+      "h": 260,
+      "channel": "wheelspeed",
+      "kind": "speed",
+      "label": "Speed",
+      "min": 0,
+      "max": {
+        "kmh": 240,
+        "mph": 150
+      },
+      "seconds": 30
+    },
+    {
+      "id": "graph-2",
+      "type": "graph",
+      "x": 478,
+      "y": 140,
+      "w": 445,
+      "h": 260,
+      "channel": "rpm",
+      "label": "RPM",
+      "min": 0,
+      "max": 8000,
+      "seconds": 30
+    },
+    {
+      "id": "graph-3",
+      "type": "graph",
+      "x": 935,
+      "y": 140,
+      "w": 445,
+      "h": 260,
+      "channel": "throttle",
+      "kind": "fraction",
+      "label": "Throttle",
+      "min": 0,
+      "max": 100,
+      "seconds": 30
+    },
+    {
+      "id": "graph-4",
+      "type": "graph",
+      "x": 20,
+      "y": 420,
+      "w": 445,
+      "h": 260,
+      "channel": "brake",
+      "kind": "fraction",
+      "label": "Brake",
+      "min": 0,
+      "max": 100,
+      "seconds": 30
+    },
+    {
+      "id": "graph-5",
+      "type": "graph",
+      "x": 478,
+      "y": 420,
+      "w": 445,
+      "h": 260,
+      "channel": "watertemp",
+      "kind": "temp",
+      "label": "Water",
+      "min": {
+        "c": 40,
+        "f": 100
+      },
+      "max": {
+        "c": 130,
+        "f": 270
+      },
+      "seconds": 30
+    },
+    {
+      "id": "graph-6",
+      "type": "graph",
+      "x": 935,
+      "y": 420,
+      "w": 445,
+      "h": 260,
+      "channel": "oiltemp",
+      "kind": "temp",
+      "label": "Oil",
+      "min": {
+        "c": 40,
+        "f": 100
+      },
+      "max": {
+        "c": 150,
+        "f": 300
+      },
+      "seconds": 30
+    }
+  ]
+}

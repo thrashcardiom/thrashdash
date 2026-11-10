@@ -1,0 +1,21 @@
+#!/bin/sh
+# Starts ThrashDash from inside the AppImage.
+#
+# Started from a desktop there is no terminal, so the program's messages would vanish: they are kept in thrashdash.log in
+# the data folder (only the latest run) so there is something to read if it does not behave. Started from a terminal they
+# stay on the terminal. --quit-when-windows-close ends ThrashDash when its last window is closed, since there is no
+# terminal to press Ctrl-C in.
+HERE="$(dirname "$(readlink -f "$0")")"
+APP="$HERE/usr/lib/thrashdash/thrashdash"
+# Commands that do something and exit always print to wherever they were run from, terminal or pipe.
+for arg in "$@"; do
+    case "$arg" in
+        --version|--help|-h|--install-mod) exec "$APP" "$@" ;;
+    esac
+done
+if [ -t 1 ]; then
+    exec "$APP" --quit-when-windows-close "$@"
+fi
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/thrashdash"
+mkdir -p "$DATA" 2>/dev/null
+exec "$APP" --quit-when-windows-close "$@" >"$DATA/thrashdash.log" 2>&1

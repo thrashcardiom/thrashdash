@@ -1,0 +1,242 @@
+{
+  "format": 1,
+  "name": "Drift / track",
+  "width": 1400,
+  "height": 560,
+  "scaleMode": "max",
+  "scalePercent": 100,
+  "widgets": [
+    {
+      "id": "roundGauge-1",
+      "type": "roundGauge",
+      "x": 480,
+      "y": 20,
+      "w": 440,
+      "h": 440,
+      "channel": "rpm",
+      "label": "RPM",
+      "showUnit": "x1000",
+      "min": 0,
+      "maxChannel": "maxrpm",
+      "maxRound": 1000,
+      "majorStep": 1000,
+      "minorDiv": 2,
+      "labelDiv": 1000,
+      "redFrom": 0.85,
+      "shiftFrom": 0.88
+    },
+    {
+      "id": "readout-1",
+      "type": "readout",
+      "x": 40,
+      "y": 40,
+      "w": 400,
+      "h": 170,
+      "channel": "wheelspeed",
+      "kind": "speed",
+      "label": "SPEED",
+      "decimals": 0,
+      "digits": 3
+    },
+    {
+      "id": "bar-1",
+      "type": "bar",
+      "x": 40,
+      "y": 235,
+      "w": 400,
+      "h": 36,
+      "channel": "throttle",
+      "kind": "fraction",
+      "label": "THR",
+      "min": 0,
+      "max": 100,
+      "segments": 24
+    },
+    {
+      "id": "bar-2",
+      "type": "bar",
+      "x": 40,
+      "y": 283,
+      "w": 400,
+      "h": 36,
+      "channel": "brake",
+      "kind": "fraction",
+      "label": "BRK",
+      "min": 0,
+      "max": 100,
+      "segments": 24
+    },
+    {
+      "id": "graph-1",
+      "type": "graph",
+      "x": 40,
+      "y": 345,
+      "w": 400,
+      "h": 150,
+      "channel": "throttle",
+      "kind": "fraction",
+      "label": "Throttle",
+      "min": 0,
+      "max": 100,
+      "seconds": 15
+    },
+    {
+      "id": "gear-1",
+      "type": "gear",
+      "x": 960,
+      "y": 30,
+      "w": 400,
+      "h": 260,
+      "channel": "gear",
+      "label": "",
+      "style": "digit"
+    },
+    {
+      "id": "bar-3",
+      "type": "bar",
+      "x": 960,
+      "y": 325,
+      "w": 400,
+      "h": 34,
+      "channel": "watertemp",
+      "kind": "temp",
+      "label": "WATER",
+      "min": {
+        "c": 40,
+        "f": 100
+      },
+      "max": {
+        "c": 130,
+        "f": 270
+      },
+      "warnFrom": {
+        "c": 105,
+        "f": 220
+      },
+      "critFrom": {
+        "c": 115,
+        "f": 240
+      },
+      "segments": 24
+    },
+    {
+      "id": "bar-4",
+      "type": "bar",
+      "x": 960,
+      "y": 375,
+      "w": 400,
+      "h": 34,
+      "channel": "oiltemp",
+      "kind": "temp",
+      "label": "OIL",
+      "min": {
+        "c": 40,
+        "f": 100
+      },
+      "max": {
+        "c": 150,
+        "f": 300
+      },
+      "warnFrom": {
+        "c": 125,
+        "f": 260
+      },
+      "critFrom": {
+        "c": 140,
+        "f": 285
+      },
+      "segments": 24
+    },
+    {
+      "id": "light-1",
+      "type": "light",
+      "x": 508,
+      "y": 492,
+      "w": 48,
+      "h": 48,
+      "channel": "checkengine",
+      "lampColor": "amber",
+      "color": "var(--warn)",
+      "text": "ENG",
+      "icon": "engine"
+    },
+    {
+      "id": "light-2",
+      "type": "light",
+      "x": 564,
+      "y": 492,
+      "w": 48,
+      "h": 48,
+      "channel": "oil",
+      "lampColor": "red",
+      "color": "var(--crit)",
+      "text": "OIL",
+      "icon": "oil"
+    },
+    {
+      "id": "light-3",
+      "type": "light",
+      "x": 620,
+      "y": 492,
+      "w": 48,
+      "h": 48,
+      "channel": "absActive",
+      "lampColor": "amber",
+      "color": "var(--warn)",
+      "text": "ABS",
+      "icon": "abs"
+    },
+    {
+      "id": "light-4",
+      "type": "light",
+      "x": 676,
+      "y": 492,
+      "w": 48,
+      "h": 48,
+      "channel": "escActive",
+      "lampColor": "amber",
+      "color": "var(--warn)",
+      "text": "ESC",
+      "icon": "esc"
+    },
+    {
+      "id": "light-5",
+      "type": "light",
+      "x": 732,
+      "y": 492,
+      "w": 48,
+      "h": 48,
+      "channel": "parkingbrake",
+      "lampColor": "red",
+      "color": "var(--crit)",
+      "text": "P",
+      "icon": "parking"
+    },
+    {
+      "id": "light-6",
+      "type": "light",
+      "x": 788,
+      "y": 492,
+      "w": 48,
+      "h": 48,
+      "channel": "signal_L",
+      "lampColor": "green",
+      "color": "var(--ok)",
+      "arrow": "left",
+      "icon": "left"
+    },
+    {
+      "id": "light-7",
+      "type": "light",
+      "x": 844,
+      "y": 492,
+      "w": 48,
+      "h": 48,
+      "channel": "signal_R",
+      "lampColor": "green",
+      "color": "var(--ok)",
+      "arrow": "right",
+      "icon": "right"
+    }
+  ]
+}

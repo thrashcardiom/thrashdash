@@ -1,0 +1,8 @@
+Fonts bundled with ThrashDash (so dashboards look the same offline, on Windows and Linux).
+All three families are licensed under the SIL Open Font License 1.1; the full texts are in ./licenses.
+Jost and Barlow Condensed are Latin subsets, converted to woff2 by tools/make_fonts.py. DSEG7 Classic declares the
+Reserved Font Name "DSEG", so it is converted to woff2 WITHOUT subsetting or any other change to the glyph data.
+
+Jost                  (c) The Jost Project Authors     https://github.com/google/fonts/tree/main/ofl/jost
+Barlow Condensed      (c) The Barlow Project Authors   https://github.com/google/fonts/tree/main/ofl/barlowcondensed
+DSEG7 Classic         (c) keshikan                     https://github.com/keshikan/DSEG

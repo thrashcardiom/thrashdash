@@ -1,0 +1,99 @@
+{
+  "format": 1,
+  "name": "Trip computer",
+  "width": 1000,
+  "height": 400,
+  "scaleMode": "max",
+  "scalePercent": 100,
+  "widgets": [
+    {
+      "id": "trip-1",
+      "type": "trip",
+      "x": 20,
+      "y": 20,
+      "w": 300,
+      "h": 360,
+      "trip": "A",
+      "label": "Trip A"
+    },
+    {
+      "id": "trip-2",
+      "type": "trip",
+      "x": 340,
+      "y": 20,
+      "w": 300,
+      "h": 360,
+      "trip": "B",
+      "label": "Trip B"
+    },
+    {
+      "id": "readout-1",
+      "type": "readout",
+      "x": 660,
+      "y": 20,
+      "w": 320,
+      "h": 130,
+      "channel": "wheelspeed",
+      "kind": "speed",
+      "label": "SPEED",
+      "decimals": 0,
+      "digits": 3
+    },
+    {
+      "id": "gear-1",
+      "type": "gear",
+      "x": 660,
+      "y": 165,
+      "w": 320,
+      "h": 130,
+      "channel": "gear",
+      "label": "",
+      "style": "digit"
+    },
+    {
+      "id": "bar-1",
+      "type": "bar",
+      "x": 660,
+      "y": 315,
+      "w": 320,
+      "h": 30,
+      "channel": "fuel",
+      "kind": "fraction",
+      "label": "FUEL",
+      "min": 0,
+      "max": 100,
+      "invert": true,
+      "warnFrom": 20,
+      "critFrom": 8,
+      "segments": 20
+    },
+    {
+      "id": "bar-2",
+      "type": "bar",
+      "x": 660,
+      "y": 355,
+      "w": 320,
+      "h": 30,
+      "channel": "watertemp",
+      "kind": "temp",
+      "label": "WATER",
+      "min": {
+        "c": 40,
+        "f": 100
+      },
+      "max": {
+        "c": 130,
+        "f": 270
+      },
+      "warnFrom": {
+        "c": 105,
+        "f": 220
+      },
+      "critFrom": {
+        "c": 115,
+        "f": 240
+      },
+      "segments": 20
+    }
+  ]
+}

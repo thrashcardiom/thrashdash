@@ -1,0 +1,105 @@
+/* Skinned widget parts (gear indicators, lamps, LED bars, LCD readout). Gauges are pure SVG (see js/skins/gauge.js). */
+
+.sk-gauge { display: block; width: 100%; height: 100%; }
+.sk-gauge .sk-rot { transition: transform 0.08s linear; will-change: transform; }
+.sk-gauge.sk-missing .sk-rot { opacity: 0.35; }
+.sk-lamp { display: block; width: 100%; height: 100%; }
+
+/* ---- gear strip ---- */
+.sk-strip { display: inline-flex; gap: 0.09em; padding: 0.23em 0.32em; border-radius: 0.27em; font: 600 22px "Barlow Condensed", sans-serif; letter-spacing: 0.04em; }
+.sk-strip-cell { min-width: 1.1em; text-align: center; }
+.sk-classicWhite.sk-strip, .sk-classicBlack.sk-strip { background: linear-gradient(#050505, #17181a); box-shadow: 0 0 0 2px #aeb3ba, 0 0 0 3.5px #5a5f66, inset 0 2px 5px rgba(0,0,0,.8); color: #4a4d52; }
+.sk-classicWhite.sk-strip .sk-strip-cell.on, .sk-classicBlack.sk-strip .sk-strip-cell.on { color: #fff; text-shadow: 0 0 6px rgba(255, 255, 255, 0.55); }
+.sk-backlit.sk-strip { background: linear-gradient(#05101b, #0a2236); box-shadow: 0 0 0 1.5px #25506f, 0 0 14px rgba(47, 155, 255, 0.35); color: #234660; }
+.sk-backlit.sk-strip .sk-strip-cell.on { color: #8fdcff; text-shadow: 0 0 5px #2f9bff, 0 0 12px #2f9bff; }
+
+/* ---- 7-segment gear digit ---- */
+.sk-digit { position: relative; display: inline-block; padding: 0.1em 0.22em; border-radius: 0.13em; font: 400 64px/1 "DSEG7 Classic", monospace; }
+.sk-digit-ghost { opacity: 0.1; }
+.sk-digit-lit { position: absolute; right: 0.22em; top: 0.1em; }
+.sk-classicWhite.sk-digit, .sk-classicBlack.sk-digit { background: #070707; box-shadow: 0 0 0 2px #aeb3ba, 0 0 0 3.5px #5a5f66, inset 0 2px 6px #000; color: #fff; }
+.sk-backlit.sk-digit { background: linear-gradient(#04101c, #0a2338); box-shadow: 0 0 0 1.5px #25506f, 0 0 16px rgba(47, 155, 255, 0.35); color: #8fdcff; }
+.sk-backlit .sk-digit-lit { text-shadow: 0 0 6px #2f9bff, 0 0 16px #2f9bff; }
+
+/* ---- LED bar ---- */
+.sk-ledbar { display: flex; gap: 3px; height: 100%; align-items: stretch; padding: 4px; border-radius: 5px; background: #060708; box-shadow: inset 0 1px 3px #000; }
+.sk-led { flex: 1; border-radius: 1.5px; background: #1b1e22; transition: background-color 0.06s, box-shadow 0.06s; }
+.sk-led[data-level="ok"].on { background: #34e07d; box-shadow: 0 0 5px rgba(52, 224, 125, 0.7); }
+.sk-led[data-level="amber"].on { background: #ffb020; box-shadow: 0 0 5px rgba(255, 176, 32, 0.7); }
+.sk-led[data-level="red"].on { background: #ff4040; box-shadow: 0 0 5px rgba(255, 64, 64, 0.75); }
+.sk-backlit.sk-ledbar { background: #040a12; box-shadow: inset 0 1px 3px #000, 0 0 0 1px #1d3d5c; }
+
+/* ---- LCD readout ---- */
+.sk-lcd { position: relative; display: inline-flex; flex-direction: column; gap: 0.12em; padding: 0.38em 0.62em 0.32em; border-radius: 0.38em; font-size: 16px; background: linear-gradient(#04101c, #0a2338); box-shadow: 0 0 0 1.5px #25506f, 0 0 14px rgba(47, 155, 255, 0.3); color: #8fdcff; }
+.sk-lcd-label { font: 600 0.62em "Barlow Condensed", sans-serif; letter-spacing: 0.12em; opacity: 0.8; }
+.sk-lcd-row { position: relative; font: 400 1.9em/1.1 "DSEG7 Classic", monospace; text-align: right; }
+.sk-lcd-ghost { opacity: 0.09; }
+.sk-lcd-lit { position: absolute; right: 0; top: 0; text-shadow: 0 0 6px #2f9bff, 0 0 14px rgba(47, 155, 255, 0.8); }
+.sk-lcd-body { display: flex; align-items: flex-end; gap: 6px; }
+.sk-lcd-unit { font: 600 0.7em "Barlow Condensed", sans-serif; opacity: 0.75; padding-bottom: 0.2em; }
+.sk-classicWhite.sk-lcd, .sk-classicBlack.sk-lcd { background: #070707; box-shadow: 0 0 0 2px #aeb3ba, 0 0 0 3.5px #5a5f66, inset 0 2px 6px #000; color: #fff; }
+.sk-classicWhite .sk-lcd-lit, .sk-classicBlack .sk-lcd-lit { text-shadow: none; }
+
+/* ---- as dashboard widgets: they fill their box and scale with it (container query units), so resizing in the editor just works ---- */
+.w-sk { container-type: size; display: flex; align-items: center; justify-content: center; }
+.w-sk.missing { opacity: 0.4; }
+.w-sk .sk-strip { font-size: min(58cqh, calc(100cqw / (var(--n, 6) * 1.2 + 0.7))); }
+.w-sk .sk-digit { font-size: min(80cqh, 72cqw); }
+.w-sk .sk-lcd { font-size: min(27cqh, calc(100cqw / (var(--digits, 6) * 1.5 + 3.6))); }
+.w-skbar { display: flex; align-items: center; gap: 12px; }
+.w-skbar .b-track-sk { flex: 1; height: 100%; max-height: 30px; min-width: 0; }
+.w-skbar .b-value { width: 84px; text-align: right; font-size: 15px; }
+.w-skbar.missing { opacity: 0.55; }
+.w-sklamp svg { width: 100%; height: 100%; }
+
+/* ---- tyres and damage in a skin ---- */
+.w-tyres.w-skinned .ty-body, .w-damage.w-skinned .dg-outline { stroke: #aeb3ba; stroke-width: 2.5; }
+.w-tyres.w-skinned .ty-rect { fill: #0b0c0e; stroke: color-mix(in srgb, var(--c) 55%, #aeb3ba); stroke-width: 2.5; }
+.w-tyres.w-skinned .ty-temp { fill: var(--c); font-family: "Barlow Condensed", sans-serif; font-weight: 600; font-size: 28px; }
+.w-tyres.w-skinned .ty-name, .w-tyres.w-skinned .ty-unit { fill: #aab0b8; font-family: "Barlow Condensed", sans-serif; }
+.w-tyres.w-skinned .ty-press { fill: #dfe3e8; font-family: "Barlow Condensed", sans-serif; font-weight: 600; font-size: 11px; }
+.w-tyres.w-skinned .ty-press.low { fill: var(--warn); }
+.w-tyres.w-skinned .ty-card[data-level="missing"] .ty-temp { fill: #565c64; }
+.w-damage.w-skinned .dg-label, .w-damage.w-skinned .dg-pct, .w-damage.w-skinned .dg-sub { font-family: "Barlow Condensed", sans-serif; }
+.w-damage.w-skinned .dg-wheel { fill: #0b0c0e; stroke: #aeb3ba; }
+.w-damage.w-skinned .dg-wheel.flat { fill: var(--crit); stroke: var(--crit); }
+
+.w-tyres.sk-backlit .ty-body, .w-damage.sk-backlit .dg-outline { stroke: #2f9bff; filter: drop-shadow(0 0 3px rgba(47, 155, 255, 0.7)); }
+.w-tyres.sk-backlit .ty-body { fill: #060c14; }
+.w-tyres.sk-backlit .ty-rect { fill: #05101c; stroke: var(--c); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--c) 70%, transparent)); }
+.w-tyres.sk-backlit .ty-temp { font-family: "DSEG7 Classic", monospace; font-weight: 400; font-size: 21px; filter: drop-shadow(0 0 3px var(--c)); }
+.w-tyres.sk-backlit .ty-press { fill: #8fdcff; }
+.w-tyres.sk-backlit .ty-card[data-level="cold"] { --c: #4db2ff; }
+.w-damage.sk-backlit .dg-wheel { stroke: #2f9bff; }
+.w-damage.sk-backlit .dg-pct { fill: #8fdcff; stroke: #04101c; }
+
+/* ---- driver inputs and the G-force meter in a skin ---- */
+.w-inputs.w-skinned .in-rim, .w-inputs.w-skinned .in-hub, .w-inputs.w-skinned .in-spoke { stroke: #aeb3ba; }
+.w-inputs.w-skinned .in-hub { fill: #0b0c0e; }
+.w-inputs.w-skinned .in-track { fill: #0b0c0e; stroke: #565c64; stroke-width: 1.5; }
+.w-inputs.w-skinned .in-label, .w-inputs.w-skinned .in-letter, .w-inputs.w-skinned .in-pct,
+.w-gmeter.w-skinned .gm-label, .w-gmeter.w-skinned .gm-now, .w-gmeter.w-skinned .gm-unit, .w-gmeter.w-skinned .gm-peak, .w-gmeter.w-skinned .gm-scale { font-family: "Barlow Condensed", sans-serif; }
+.w-gmeter.w-skinned .gm-face { fill: #0b0c0e; }
+.w-gmeter.w-skinned .gm-ring, .w-gmeter.w-skinned .gm-axis { stroke: #3a4048; }
+.w-gmeter.w-skinned .gm-outer { stroke: #aeb3ba; stroke-width: 2.5; }
+.w-gmeter.w-skinned .gm-dot { fill: #ff5a3c; stroke: #dfe3e8; }
+.w-gmeter.w-skinned .gm-trail { fill: #ff5a3c; }
+
+.w-inputs.sk-backlit .in-rim, .w-inputs.sk-backlit .in-spoke { stroke: #2f9bff; filter: drop-shadow(0 0 3px rgba(47, 155, 255, 0.7)); }
+.w-inputs.sk-backlit .in-hub { fill: #04101c; stroke: #2f9bff; }
+.w-inputs.sk-backlit .in-track { fill: #05101c; stroke: #1c4a7a; }
+.w-inputs.sk-backlit .in-pct, .w-inputs.sk-backlit .in-letter { fill: #8fdcff; }
+.w-gmeter.sk-backlit .gm-face { fill: #04101c; }
+.w-gmeter.sk-backlit .gm-ring, .w-gmeter.sk-backlit .gm-axis { stroke: #1c4a7a; }
+.w-gmeter.sk-backlit .gm-outer { stroke: #2f9bff; filter: drop-shadow(0 0 3px rgba(47, 155, 255, 0.7)); }
+.w-gmeter.sk-backlit .gm-dot, .w-gmeter.sk-backlit .gm-trail { fill: #8fdcff; filter: drop-shadow(0 0 4px #4db2ff); }
+.w-gmeter.sk-backlit .gm-now { font-family: "DSEG7 Classic", monospace; font-weight: 400; color: #8fdcff; }
+
+/* ---- trip computer in a skin ---- */
+.w-trip.w-skinned { background: #0b0c0e; border: 1px solid #3a4048; }
+.w-trip.w-skinned .tr-title, .w-trip.w-skinned .tr-label, .w-trip.w-skinned .tr-value, .w-trip.w-skinned .tr-reset { font-family: "Barlow Condensed", sans-serif; }
+.w-trip.w-skinned .tr-value { font-size: 22px; color: #dfe3e8; }
+.w-trip.w-skinned .tr-row { border-top-color: #2a2f36; }
+.w-trip.sk-backlit { background: #04101c; border-color: #1c4a7a; box-shadow: inset 0 0 12px rgba(47, 155, 255, 0.15); }
+.w-trip.sk-backlit .tr-title, .w-trip.sk-backlit .tr-label { color: #5fa9e0; }
+.w-trip.sk-backlit .tr-value { font-family: "DSEG7 Classic", monospace; font-weight: 400; font-size: 17px; color: #8fdcff; text-shadow: 0 0 6px rgba(77, 178, 255, 0.7); }

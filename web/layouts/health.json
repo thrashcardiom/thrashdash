@@ -1,0 +1,313 @@
+{
+  "format": 1,
+  "name": "Vehicle health",
+  "width": 1140,
+  "height": 440,
+  "scaleMode": "max",
+  "scalePercent": 100,
+  "widgets": [
+    {
+      "id": "tyres-1",
+      "type": "tyres",
+      "x": 20,
+      "y": 20,
+      "w": 300,
+      "h": 400,
+      "source": "temp",
+      "showPressure": true
+    },
+    {
+      "id": "damage-1",
+      "type": "damage",
+      "x": 340,
+      "y": 20,
+      "w": 240,
+      "h": 400,
+      "label": "Body damage",
+      "showPercent": true,
+      "showTyres": true
+    },
+    {
+      "id": "readout-1",
+      "type": "readout",
+      "x": 610,
+      "y": 20,
+      "w": 245,
+      "h": 104,
+      "channel": "damage.deformedPct",
+      "label": "DEFORMED",
+      "showUnit": "%",
+      "decimals": 1,
+      "digits": 5
+    },
+    {
+      "id": "readout-2",
+      "type": "readout",
+      "x": 870,
+      "y": 20,
+      "w": 245,
+      "h": 104,
+      "channel": "damage.brokenPct",
+      "label": "BROKEN",
+      "showUnit": "%",
+      "decimals": 1,
+      "digits": 5
+    },
+    {
+      "id": "bar-1",
+      "type": "bar",
+      "x": 610,
+      "y": 142,
+      "w": 505,
+      "h": 34,
+      "channel": "wheelThermals.FL.brakeSurfaceTemperature",
+      "kind": "temp",
+      "label": "BRK FL",
+      "min": {
+        "c": 0,
+        "f": 32
+      },
+      "max": {
+        "c": 900,
+        "f": 1650
+      },
+      "warnFrom": {
+        "c": 500,
+        "f": 932
+      },
+      "critFrom": {
+        "c": 700,
+        "f": 1292
+      },
+      "segments": 30
+    },
+    {
+      "id": "bar-2",
+      "type": "bar",
+      "x": 610,
+      "y": 186,
+      "w": 505,
+      "h": 34,
+      "channel": "wheelThermals.FR.brakeSurfaceTemperature",
+      "kind": "temp",
+      "label": "BRK FR",
+      "min": {
+        "c": 0,
+        "f": 32
+      },
+      "max": {
+        "c": 900,
+        "f": 1650
+      },
+      "warnFrom": {
+        "c": 500,
+        "f": 932
+      },
+      "critFrom": {
+        "c": 700,
+        "f": 1292
+      },
+      "segments": 30
+    },
+    {
+      "id": "bar-3",
+      "type": "bar",
+      "x": 610,
+      "y": 230,
+      "w": 505,
+      "h": 34,
+      "channel": "wheelThermals.RL.brakeSurfaceTemperature",
+      "kind": "temp",
+      "label": "BRK RL",
+      "min": {
+        "c": 0,
+        "f": 32
+      },
+      "max": {
+        "c": 900,
+        "f": 1650
+      },
+      "warnFrom": {
+        "c": 500,
+        "f": 932
+      },
+      "critFrom": {
+        "c": 700,
+        "f": 1292
+      },
+      "segments": 30
+    },
+    {
+      "id": "bar-4",
+      "type": "bar",
+      "x": 610,
+      "y": 274,
+      "w": 505,
+      "h": 34,
+      "channel": "wheelThermals.RR.brakeSurfaceTemperature",
+      "kind": "temp",
+      "label": "BRK RR",
+      "min": {
+        "c": 0,
+        "f": 32
+      },
+      "max": {
+        "c": 900,
+        "f": 1650
+      },
+      "warnFrom": {
+        "c": 500,
+        "f": 932
+      },
+      "critFrom": {
+        "c": 700,
+        "f": 1292
+      },
+      "segments": 30
+    },
+    {
+      "id": "light-1",
+      "type": "light",
+      "x": 610,
+      "y": 336,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.coolantOverheating",
+      "text": "COOLNT",
+      "lampColor": "red",
+      "color": "var(--crit)"
+    },
+    {
+      "id": "light-2",
+      "type": "light",
+      "x": 696,
+      "y": 336,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.oilOverheating",
+      "text": "OIL HT",
+      "lampColor": "red",
+      "color": "var(--crit)"
+    },
+    {
+      "id": "light-3",
+      "type": "light",
+      "x": 782,
+      "y": 336,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.oilLevelCritical",
+      "text": "OIL LO",
+      "lampColor": "red",
+      "color": "var(--crit)"
+    },
+    {
+      "id": "light-4",
+      "type": "light",
+      "x": 868,
+      "y": 336,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.starvedOfOil",
+      "text": "STARVD",
+      "lampColor": "red",
+      "color": "var(--crit)"
+    },
+    {
+      "id": "light-5",
+      "type": "light",
+      "x": 954,
+      "y": 336,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.headGasketDamaged",
+      "text": "GASKET",
+      "lampColor": "red",
+      "color": "var(--crit)"
+    },
+    {
+      "id": "light-6",
+      "type": "light",
+      "x": 1040,
+      "y": 336,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.engineHydrolocked",
+      "text": "HYDRO",
+      "lampColor": "red",
+      "color": "var(--crit)"
+    },
+    {
+      "id": "light-7",
+      "type": "light",
+      "x": 610,
+      "y": 388,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.engineLockedUp",
+      "text": "LOCKED",
+      "lampColor": "red",
+      "color": "var(--crit)"
+    },
+    {
+      "id": "light-8",
+      "type": "light",
+      "x": 696,
+      "y": 388,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.overRevDanger",
+      "text": "OVRREV",
+      "lampColor": "amber",
+      "color": "var(--warn)"
+    },
+    {
+      "id": "light-9",
+      "type": "light",
+      "x": 782,
+      "y": 388,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.overTorqueDanger",
+      "text": "OVRTRQ",
+      "lampColor": "amber",
+      "color": "var(--warn)"
+    },
+    {
+      "id": "light-10",
+      "type": "light",
+      "x": 868,
+      "y": 388,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.turbochargerHot",
+      "text": "TURBO",
+      "lampColor": "amber",
+      "color": "var(--warn)"
+    },
+    {
+      "id": "light-11",
+      "type": "light",
+      "x": 954,
+      "y": 388,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.radiatorLeak",
+      "text": "RAD LK",
+      "lampColor": "amber",
+      "color": "var(--warn)"
+    },
+    {
+      "id": "light-12",
+      "type": "light",
+      "x": 1040,
+      "y": 388,
+      "w": 80,
+      "h": 44,
+      "channel": "state.engine.engineReducedTorque",
+      "text": "LIMP",
+      "lampColor": "amber",
+      "color": "var(--warn)"
+    }
+  ]
+}

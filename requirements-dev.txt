@@ -1,0 +1,4 @@
+# Developer-only tools (the running app needs only requirements.txt)
+fonttools
+brotli
+qrcode  # cross-checks web/js/qr.js in relay/tests/test_qr.py
