@@ -24,6 +24,7 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
   let isOpen = false;
   let items = []; // ids in display order, for the 1-9 shortcuts
   let networkError = ""; // why the last attempt to switch network access on failed
+  let pinMessage = ""; // what to say under the PIN field after saving it (or failing to)
 
   const buttons = () => [...menu.querySelectorAll(".dm-item, .dm-skin, .dm-action")].filter((b) => !b.disabled);
 
@@ -67,7 +68,7 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
     if (await remove(layout)) await refresh();
   }
 
-  function render(layouts, settings, client) {
+  function render(layouts, settings, client, lan = { pin: { set: false, pin: "" }, token: null }) {
     const local = client.local; // only the computer running ThrashDash may change things; a phone or tablet can only look
     menu.replaceChildren();
     items = layouts.map((l) => l.id);
@@ -149,26 +150,71 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
     }
 
     if (local) {
-      // Serving to phones and tablets on the same network (switched on and off here, no restart).
+      // Serving to phones and tablets on the same network (switched on and off here, no restart). It always needs a PIN.
       h("div", "dm-title dm-title-sep", menu, "Phones and other devices");
+      h("div", "dm-note", menu, "Devices on your network must enter this PIN (4 to 8 digits) before they can see anything.");
+      const pinRow = h("div", "dm-pin", menu);
+      const pinInput = h("input", "dm-pin-input", pinRow);
+      pinInput.type = "text";
+      pinInput.inputMode = "numeric";
+      pinInput.maxLength = 8;
+      pinInput.pattern = "[0-9]*";
+      pinInput.autocomplete = "off";
+      pinInput.placeholder = "PIN";
+      pinInput.value = lan.pin.pin;
+      pinInput.setAttribute("aria-label", "PIN for phones and tablets");
+      const savePin = h("button", "dm-action dm-pin-save", pinRow, "Save PIN");
+      savePin.type = "button";
+      const saveThePin = async () => {
+        const value = pinInput.value.trim();
+        if (!/^[0-9]{4,8}$/.test(value)) {
+          pinMessage = "The PIN must be 4 to 8 digits.";
+          return refresh();
+        }
+        try {
+          const result = await api.setLanPin(value);
+          pinMessage = result.error ? `PIN saved, but network access could not start: ${result.error}` : lan.pin.set ? "PIN saved. Every phone must sign in again." : "PIN saved.";
+        } catch (e) {
+          pinMessage = e.message;
+        }
+        await refresh();
+      };
+      savePin.addEventListener("click", saveThePin);
+      pinInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          saveThePin();
+        }
+      });
+      if (pinMessage) h("div", "dm-note dm-pin-status", menu, pinMessage);
+      pinMessage = "";
+
       const net = h("button", "dm-action dm-wide", menu, `${client.lan.enabled ? "\u2611" : "\u2610"} Serve to devices on my network`);
       net.type = "button";
       net.setAttribute("role", "menuitemcheckbox");
       net.setAttribute("aria-checked", String(client.lan.enabled));
+      net.disabled = !lan.pin.set && !client.lan.enabled; // no PIN, no network access
+      net.title = net.disabled ? "Choose a PIN first" : "";
       net.addEventListener("click", () => setNetwork(!client.lan.enabled));
+      if (!lan.pin.set) h("div", "dm-note", menu, "Save a PIN above to be able to switch this on.");
       if (networkError) h("div", "dm-error", menu, networkError);
       if (client.lan.enabled && client.lan.urls.length) {
         const withDashboard = (base) => base + (currentId() ? `?d=${encodeURIComponent(currentId())}` : "");
+        // The QR code also carries a single-use sign-in token (good for a few minutes), so scanning it needs no PIN typing.
+        // The address shown as text has no token in it: anyone typing it in is asked for the PIN.
+        const qrAddress = new URL(withDashboard(client.lan.urls[0]));
+        if (lan.token) qrAddress.searchParams.set("t", lan.token);
         const box = h("div", "dm-net", menu);
         try {
-          box.appendChild(qrSvg(withDashboard(client.lan.urls[0]), { size: 160 }));
+          box.appendChild(qrSvg(qrAddress.toString(), { size: 176 }));
         } catch (e) {
           console.warn("ThrashDash: could not draw the QR code", e);
         }
         const text = h("div", "dm-urls", box);
-        h("div", "dm-note", text, "Scan with your phone's camera, or type an address:");
+        h("div", "dm-note", text, "Scan with your phone's camera (signs in at once), or type an address and the PIN:");
         for (const base of client.lan.urls) h("div", "dm-url", text, withDashboard(base));
-        h("div", "dm-note", menu, "Anyone on this network can view your dashboards. Only this computer can change them.");
+        h("div", "dm-note", menu, "The QR code works once, for about 5 minutes: close and reopen this menu for a fresh one. A phone stays signed in for 30 days; saving a new PIN signs every phone out. Only this computer can change anything.");
+        h("div", "dm-note", menu, "The PIN is sent unencrypted over your network. It keeps casual visitors out; it does not protect against someone who can watch the network traffic.");
         // ThrashDash does not look at or change the firewall: letting other devices through is up to whoever administers this computer.
         h("div", "dm-note", menu, `If a phone cannot connect, this computer's firewall may need to allow port ${new URL(client.lan.urls[0]).port}. That is for your system administrator to decide.`);
       }
@@ -203,7 +249,12 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
     const focusedId = document.activeElement?.dataset?.id;
     try {
       const [layouts, settings, client] = await Promise.all([api.listLayouts(), api.getSettings(), api.getClient()]);
-      render(layouts, settings, client);
+      const lan = { pin: { set: false, pin: "" }, token: null };
+      if (client.local) {
+        lan.pin = await api.getLanPin().catch(() => lan.pin);
+        if (client.lan.enabled) lan.token = await api.lanToken().then((r) => r.token).catch(() => null);
+      }
+      render(layouts, settings, client, lan);
     } catch (e) {
       menu.replaceChildren();
       h("div", "dm-empty", menu, `Could not load the list: ${e.message}`);
@@ -243,6 +294,7 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
         e.stopPropagation();
       };
       const focused = document.activeElement;
+      if (focused?.tagName === "INPUT" && e.key !== "Escape") return; // typing (the PIN field): 1-9 must not pick a dashboard, nor arrows move
       if (e.key === "Escape") {
         swallow();
         hide();

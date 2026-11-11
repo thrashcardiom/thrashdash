@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e13">
+  <title>ThrashDash: enter the PIN</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/css/pin.css">
+</head>
+<body>
+  <main>
+    <h1>ThrashDash</h1>
+    <p class="lead">Enter the PIN shown on the computer running ThrashDash.</p>
+    <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="one-time-code" autofocus aria-label="PIN" placeholder="PIN">
+    <button id="go" type="button">Sign in</button>
+    <p id="message" role="alert" aria-live="assertive"></p>
+    <p class="small">You only need to do this once on this device. Or scan the QR code in the Dashboards menu on the computer.</p>
+  </main>
+  <script type="module" src="/js/pin.js"></script>
+</body>
+</html>

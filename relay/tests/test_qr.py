@@ -23,6 +23,7 @@ SAMPLES = [
     "a", "hello", "http://192.168.1.20:8765/", "http://192.168.100.200:8765/?d=u-0123456789ab",
     "x" * 14, "y" * 15, "z" * 26, "q" * 42, "w" * 62, "e" * 84, "r" * 106, "t" * 122, "u" * 152, "i" * 180, "o" * 213,
     "Héllo € über/你好",  # non-ASCII: must be encoded as UTF-8 bytes
+    "http://192.168.100.200:8765/?d=u-0123456789ab&w=abc123def456&t=Zk3x9_Qm-p2LsT7vYbN4cRwA8dEfGhJk",  # what the menu's QR code carries: address, dashboard and a sign-in token
 ]
 
 

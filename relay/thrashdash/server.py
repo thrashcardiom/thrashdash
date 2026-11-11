@@ -1,14 +1,15 @@
 """HTTP + WebSocket server: serves the dashboard and streams telemetry to it."""
 import asyncio
 import json
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 from aiohttp import web
 
 from . import __version__
+from .auth import COOKIE_NAME, AuthStore
 from .lifecycle import WindowCounter
 from .windows import WindowRegistry
-from .api import HUB, LAN_CONTROLLER, LAYOUTS, LOCAL_CHECK, SETTINGS, WINDOWS, add_routes, check_write_allowed
+from .api import AUTH, HUB, LAN_CONTROLLER, LAYOUTS, LOCAL_CHECK, SETTINGS, WINDOWS, add_routes, check_write_allowed, set_session_cookie
 from .lan import LanController
 from .netinfo import host_allowed, is_local_client
 from .paths import web_root
@@ -27,6 +28,55 @@ CSP = (
 PORT = web.AppKey("port", int)
 WINDOW_COUNTER = web.AppKey("window_counter", WindowCounter)  # open dashboard windows on this computer (their WebSockets)
 REMOTE_SOCKETS = web.AppKey("remote_sockets", set)
+
+
+# What a device on the network may fetch BEFORE it has signed in: only the PIN page and what it needs.
+PIN_PAGE = "/pin.html"
+LOGIN_PATH = "/api/pin/login"
+SIGN_IN_FILES = {PIN_PAGE, "/js/pin.js", "/css/pin.css"}
+
+
+def _harden(response):
+    response.headers["Content-Security-Policy"] = CSP
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "no-store"  # a dashboard edited between runs must never show stale JS
+    return response
+
+
+def _address_without(request, name):
+    """This request's path and query with one query parameter taken out (the sign-in token must not stay in the address)."""
+    rest = [(k, v) for k, v in request.query.items() if k != name]
+    # Always a path on this site: a request for "//other.example/" must not become a redirect to another site
+    return "/" + request.path.lstrip("/") + (("?" + urlencode(rest)) if rest else "")
+
+
+def _wants_a_page(request):
+    return request.method == "GET" and "text/html" in request.headers.get("Accept", "")
+
+
+def _sign_in_gate(request):
+    """For a device on the network: let it through if it is signed in; sign it in if it brings a valid QR token; otherwise
+    send it to the PIN page (a browser navigation) or refuse (anything else). Raises to answer the request itself."""
+    auth = request.app[AUTH]
+    if auth.cookie_valid(request.cookies.get(COOKIE_NAME)):
+        return
+    token = request.query.get("t")
+    if token and request.method == "GET":
+        wait = auth.throttle.wait_seconds(request.remote)
+        if wait:
+            raise web.HTTPTooManyRequests(text=f"too many attempts; try again in {wait} seconds", headers={"Retry-After": str(wait)})
+        if auth.use_token(token):
+            auth.throttle.succeeded(request.remote)
+            signed_in = web.HTTPFound(_address_without(request, "t"))  # same page, minus the token
+            set_session_cookie(signed_in, auth)
+            raise _harden(signed_in)
+        auth.throttle.failed(request.remote)
+    if request.path in SIGN_IN_FILES or (request.path == LOGIN_PATH and request.method == "POST"):
+        return
+    if _wants_a_page(request):
+        raise _harden(web.HTTPFound(PIN_PAGE + "?next=" + quote(_address_without(request, "t"), safe="")))
+    raise web.HTTPUnauthorized(text="PIN required")
 
 
 @web.middleware
@@ -50,16 +100,21 @@ async def guard(request, handler):
     origin = request.headers.get("Origin")
     if origin is not None and urlparse(origin).netloc.lower() != host.lower():
         raise web.HTTPForbidden(text="cross-origin request refused")
+    if not request.app[LOCAL_CHECK](request.remote):
+        # A device on the network: it needs the PIN (this computer never does). If network access were somehow on with no PIN
+        # set, no device is signed in and none can sign in, so it fails closed.
+        try:
+            _sign_in_gate(request)
+        except web.HTTPException as exc:
+            _harden(exc)
+            raise
     if request.method not in ("GET", "HEAD"):
-        check_write_allowed(request)
+        check_write_allowed(request, allow_remote=(request.path == LOGIN_PATH))
     try:
         response = await handler(request)
     except web.HTTPException as exc:  # error responses (404, 413...) get the same hardening headers
         response = exc
-    response.headers["Content-Security-Policy"] = CSP
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Cache-Control"] = "no-store"  # a dashboard edited between runs must never show stale JS
+    _harden(response)
     if isinstance(response, web.HTTPException):
         raise response
     return response
@@ -123,7 +178,7 @@ async def ws_handler(request):
 MAX_BODY = 256 * 1024  # a layout is a few KB; this bounds what any write can make us buffer
 
 
-def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_client, windows=None):
+def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_client, windows=None, auth=None):
     """Build the web application. `lan` controls network access (default: an inert controller, i.e. off).
     `local_check(remote_address)` says whether a client is this computer; tests replace it to play a remote device."""
     app = web.Application(middlewares=[guard], client_max_size=MAX_BODY)
@@ -137,6 +192,7 @@ def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_c
     app[LAYOUTS] = layouts
     app[SETTINGS] = settings
     app[WINDOWS] = windows if windows is not None else WindowRegistry()  # (in memory only unless the caller gives it a file)
+    app[AUTH] = auth if auth is not None else AuthStore()  # (no PIN, in memory, unless the caller gives it a file)
 
     async def close_remote():
         for ws in list(app[REMOTE_SOCKETS]):

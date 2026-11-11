@@ -7,10 +7,12 @@ import unittest
 from pathlib import Path
 
 import aiohttp
+from yarl import URL
 from aiohttp import web
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from thrashdash.auth import COOKIE_NAME, AuthStore  # noqa: E402
 from thrashdash.hub import Hub  # noqa: E402
 from thrashdash.lan import LanController  # noqa: E402
 from thrashdash.netinfo import host_allowed, is_local_client, lan_addresses, parse_host  # noqa: E402
@@ -90,8 +92,9 @@ def free_port():
         return s.getsockname()[1]
 
 
-class NetworkServerTests(unittest.IsolatedAsyncioTestCase):
-    """A real server. 127.0.0.2 stands in for "a LAN address" (Linux accepts any 127.x.x.x on the loopback device)."""
+class NetworkFixture(unittest.IsolatedAsyncioTestCase):
+    """A real server. 127.0.0.2 stands in for "a LAN address" (Linux accepts any 127.x.x.x on the loopback device).
+    It has a PIN (4821); a test that plays a phone calls sign_in() first, unless it is about signing in."""
 
     FAKE_LAN = "127.0.0.2"
 
@@ -101,13 +104,15 @@ class NetworkServerTests(unittest.IsolatedAsyncioTestCase):
         self.port = free_port()
         self.lan = LanController(self.port, addresses=lambda: [self.FAKE_LAN])
         self.remote = False  # flipped by tests to play a phone: the server then sees clients as "not this computer"
+        self.auth = AuthStore()
+        self.auth.set_pin("4821")
         app = make_app(Hub(), self.port, LayoutStore(data / "layouts", web_root() / "layouts"), SettingsStore(data / "settings.json"),
-                       lan=self.lan, local_check=lambda remote: not self.remote and remote is not None)
+                       lan=self.lan, auth=self.auth, local_check=lambda remote: not self.remote and remote is not None)
         self.runner = web.AppRunner(app, access_log=None)
         await self.runner.setup()
         self.lan.attach(self.runner)
         await web.TCPSite(self.runner, "127.0.0.1", self.port).start()
-        self.http = aiohttp.ClientSession()
+        self.http = aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True))  # (unsafe: cookies for an IP address)
         self.local = f"http://127.0.0.1:{self.port}"
         self.lan_url = f"http://{self.FAKE_LAN}:{self.port}"
 
@@ -126,6 +131,14 @@ class NetworkServerTests(unittest.IsolatedAsyncioTestCase):
         except (aiohttp.ClientError, asyncio.TimeoutError):
             return None
 
+    def sign_in(self):
+        """Make this client a phone that has already entered the PIN."""
+        self.remote = True
+        self.http.cookie_jar.update_cookies({COOKIE_NAME: self.auth.issue_cookie()}, URL(self.lan_url))
+
+
+
+class NetworkServerTests(NetworkFixture):
     async def test_off_by_default_not_even_listening_beyond_this_computer(self):
         self.assertEqual(await self.reachable(self.local), 200)
         self.assertIsNone(await self.reachable(self.lan_url))
@@ -159,7 +172,7 @@ class NetworkServerTests(unittest.IsolatedAsyncioTestCase):
         await self.lan.enable()
         async with self.http.get(self.local + "/api/client") as r:
             body = await r.json()
-        self.assertEqual(set(body), {"local", "lan"})
+        self.assertEqual(set(body), {"local", "pinSet", "lan"})
         self.assertEqual(set(body["lan"]), {"enabled", "urls"})
 
     async def test_a_port_that_cannot_be_bound_fails_cleanly(self):
@@ -173,7 +186,7 @@ class NetworkServerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_remote_devices_can_look_but_not_touch(self):
         await self.lan.enable()
-        self.remote = True
+        self.sign_in()
         for path in ("/api/layouts", "/api/layouts/default", "/api/settings", "/api/status", "/"):
             async with self.http.get(self.lan_url + path) as r:
                 self.assertEqual(r.status, 200, path)
@@ -187,10 +200,11 @@ class NetworkServerTests(unittest.IsolatedAsyncioTestCase):
         async with self.http.get(self.lan_url + "/api/client") as r:
             body = await r.json()
         self.assertEqual((body["local"], body["lan"]["urls"]), (False, []))  # and is not told the addresses
+        self.assertNotIn("pin", body)  # (nor the PIN: only whether one is set)
 
     async def test_remote_devices_get_the_live_data_stream(self):
         await self.lan.enable()
-        self.remote = True
+        self.sign_in()
         async with self.http.ws_connect(self.lan_url + "/ws", headers={"Origin": self.lan_url}) as ws:
             self.assertEqual((await ws.receive_json(timeout=2))["type"], "hello")
 
@@ -212,7 +226,7 @@ class NetworkServerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_switching_off_drops_connected_remote_devices(self):
         await self.lan.enable()
-        self.remote = True
+        self.sign_in()
         ws = await self.http.ws_connect(self.lan_url + "/ws", headers={"Origin": self.lan_url})
         self.assertEqual((await ws.receive_json(timeout=2))["type"], "hello")
         self.remote = False  # the PC itself now turns the switch off

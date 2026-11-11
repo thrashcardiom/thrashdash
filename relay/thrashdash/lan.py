@@ -26,6 +26,7 @@ class LanController:
         self.runner = None
         self.sites = {}  # address -> TCPSite
         self.on_disable = None  # async callback: drop already-connected remote clients when the switch goes off
+        self.start_when_pin_set = False  # --lan was given but no PIN exists yet: start as soon as one is chosen (this run only)
 
     def attach(self, runner):
         self.runner = runner

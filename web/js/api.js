@@ -29,6 +29,11 @@ export const api = {
   putWindow: (id, report) => call("PUT", `/api/windows/${encodeURIComponent(id)}`, report),
   /** This window was closed. `keepalive` lets the request finish while the page is going away. */
   forgetWindow: (id, stamp) => call("DELETE", `/api/windows/${encodeURIComponent(id)}?t=${encodeURIComponent(stamp)}`, undefined, { keepalive: true }),
+  /** The PIN devices on the network must enter ({set, pin}); only this computer may read it. */
+  getLanPin: () => call("GET", "/api/lan/pin"),
+  setLanPin: (pin) => call("PUT", "/api/lan/pin", { pin }),
+  /** A single-use token for the QR code, so scanning it signs a phone in without typing the PIN. */
+  lanToken: () => call("POST", "/api/lan/token", {}),
   getClient: () => call("GET", "/api/client"),
   getSettings: () => call("GET", "/api/settings"),
   saveSettings: (patch) => call("PUT", "/api/settings", patch),

@@ -9,6 +9,7 @@ from . import __version__, simulator
 from .hub import Hub
 from .lan import LanController, LanError
 from .lifecycle import QUIT_GRACE_S, STARTUP_TIMEOUT_S, QuitWatcher, quit_when_windows_close
+from .auth import AuthStore, valid_pin
 from .modinstall import install_mod
 from .launcher import find_browser, open_in_default_browser, open_window, profile_in_use
 from .netinfo import is_local_client, lan_addresses
@@ -36,6 +37,7 @@ def parse_args(argv=None):
     p.add_argument("--lan", action="store_true", help="serve to other devices on your network (a phone or tablet) from the start; it can also be switched on from the Dashboards menu while running")
     p.add_argument("--debug-quit-grace", type=float, default=QUIT_GRACE_S, help=argparse.SUPPRESS)  # testing only: seconds to wait before quitting
     p.add_argument("--debug-quit-startup", type=float, default=STARTUP_TIMEOUT_S, help=argparse.SUPPRESS)  # testing only: seconds to wait for a first window
+    p.add_argument("--debug-pin", metavar="PIN", help=argparse.SUPPRESS)  # testing only: set the PIN for devices on the network at start
     p.add_argument("--debug-lan-address", metavar="IP", help=argparse.SUPPRESS)  # testing only: pretend this is the computer's network address
     p.add_argument("--debug-treat-clients-as-remote", action="store_true", help=argparse.SUPPRESS)  # testing only: makes even this computer look like a phone
     p.add_argument("--install-mod", nargs="?", const="", metavar="PATH", help="copy the BeamNG mod into the game's mods folder and exit; PATH is the game's user folder if it cannot be found by itself")
@@ -56,7 +58,13 @@ async def amain(args):
     settings = SettingsStore(data_dir / "settings.json")
     lan = LanController(args.http_port, addresses=(lambda: [args.debug_lan_address]) if args.debug_lan_address else lan_addresses)
     windows = WindowRegistry(None if args.simulate else data_dir / "windows.json")  # (as with trips, a simulated run is not remembered)
-    app = make_app(hub, args.http_port, layouts, settings, lan=lan, local_check=(lambda remote: False) if args.debug_treat_clients_as_remote else is_local_client, windows=windows)
+    auth = AuthStore(data_dir / "auth.json")
+    if args.debug_pin:
+        if not valid_pin(args.debug_pin):
+            print("--debug-pin must be 4 to 8 digits", file=sys.stderr)
+            return 2
+        auth.set_pin(args.debug_pin)
+    app = make_app(hub, args.http_port, layouts, settings, lan=lan, auth=auth, local_check=(lambda remote: False) if args.debug_treat_clients_as_remote else is_local_client, windows=windows)
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     lan.attach(runner)
@@ -86,12 +94,17 @@ async def amain(args):
     url = f"http://127.0.0.1:{args.http_port}/"
     print(f"ThrashDash {__version__}\n  source   : {source}\n  dashboard: {url}\n  data     : {data_dir}")
     if args.lan or settings.get()["lan"]:
-        try:
-            urls = await lan.enable()
-            print("  network  : " + "  ".join(urls))
-            print("  NOTE     : anyone on this network can VIEW your dashboards (only this computer can change them).")
-        except LanError as e:
-            print(f"  network  : not available. {e}", file=sys.stderr)
+        if not auth.has_pin:
+            # Network access always needs a PIN. It stays off until one is chosen in the menu; --lan is honoured then.
+            lan.start_when_pin_set = args.lan
+            print("  network  : off until you choose a PIN: open the Dashboards menu on this computer, under 'Phones and other devices'.")
+        else:
+            try:
+                urls = await lan.enable()
+                print("  network  : " + "  ".join(urls))
+                print("  NOTE     : devices on this network need the PIN to VIEW your dashboards (only this computer can change them).")
+            except LanError as e:
+                print(f"  network  : not available. {e}", file=sys.stderr)
 
     if not args.no_window:
         browser = find_browser(args.browser)

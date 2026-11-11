@@ -12,7 +12,7 @@ ThrashDash shows what your car is doing (speed, revs, temperatures, tyres, damag
 - **Tyre temperature and pressure, body damage and component states**, with an alert banner when something goes wrong.
 - **Two trip meters** (A and B) with fuel or battery economy and range, kept across restarts.
 - **Per-vehicle dashboards** that switch by themselves when you change car, and **remembered windows** that reopen as you left them.
-- **Phones and tablets**: switch on network access from the menu, scan a QR code, and the dashboard is on your phone.
+- **Phones and tablets**: choose a PIN, switch on network access from the menu, scan a QR code, and the dashboard is on your phone. Nothing is shown to a device that doesn't have the PIN.
 - **No build step, no internet, no accounts.** The dashboard is plain JavaScript served from your own computer, and nothing leaves it.
 
 > [!NOTE]
@@ -63,12 +63,15 @@ Why it is built this way: the game stays untouched apart from one small mod, the
 
 ## Requirements
 
-| | |
-|:---|:---|
-| **Game** | BeamNG.drive (tested on 0.40.5, native Linux build) |
-| **Python** | 3.10 or newer (developed on 3.13), plus [`aiohttp`](https://docs.aiohttp.org/) 3.9 or newer |
-| **Browser** | A Chromium-based browser for the borderless app window: Chrome, Edge, Brave or Chromium (Edge comes with Windows). Other browsers can open the dashboard at its address but are untested. |
-| **Optional** | Node.js 22+ and LuaJIT, only to run the tests; `fonttools`, `brotli` and `qrcode` (see `requirements-dev.txt`) only for developer tools |
+| | The AppImage | From the source |
+|:---|:---|:---|
+| **Game** | BeamNG.drive (tested on 0.40.5, native Linux build) | the same |
+| **Operating system** | Linux, x86_64, any distribution from about 2022 on | Linux, or Windows (untested); anything Python runs on |
+| **Python** | Not needed: it is inside the AppImage | 3.10 or newer (developed on 3.13), plus [`aiohttp`](https://docs.aiohttp.org/) 3.9 or newer |
+| **Browser** | A Chromium-based browser for the borderless app window: Chrome, Edge, Brave or Chromium. Without one, the dashboard opens in your default browser. | the same (Edge comes with Windows) |
+| **Optional** | | Node.js 22+ and LuaJIT, only to run the tests; `fonttools`, `brotli` and `qrcode` (see `requirements-dev.txt`) only for developer tools |
+
+Other browsers can open the dashboard at its address but are untested.
 
 ## Installation
 
@@ -76,9 +79,15 @@ There are two ways to get ThrashDash: the single-file **AppImage** for Linux, wh
 
 ### Option A: the AppImage (Linux)
 
-The AppImage is one file that contains the program, Python and the dashboard. You still need a Chromium-based browser (Chrome, Chromium, Edge or Brave); ThrashDash opens it for you.
+The AppImage is one file that contains the program, Python and the dashboard. A Chromium-based browser (Chrome, Chromium, Edge or Brave) gives you the borderless dashboard window, and ThrashDash opens it for you.
 
-1. Make the file executable (once), then run it:
+1. Download `ThrashDash-<version>-x86_64.AppImage` from the project's [Releases page](https://github.com/thrashcardiom/thrashdash/releases). Each release lists the file's SHA-256 checksum; to check your download matches it:
+
+   ```sh
+   sha256sum ThrashDash-0.1.0-x86_64.AppImage
+   ```
+
+2. Make the file executable (once), then run it:
 
    ```sh
    chmod +x ThrashDash-0.1.0-x86_64.AppImage
@@ -87,7 +96,7 @@ The AppImage is one file that contains the program, Python and the dashboard. Yo
 
    Or double-click it in your file manager. The dashboard window opens by itself.
 
-2. Install the mod into the game, with one command (the mod is inside the AppImage):
+3. Install the mod into the game, with one command (the mod is inside the AppImage):
 
    ```sh
    ./ThrashDash-0.1.0-x86_64.AppImage --install-mod
@@ -95,7 +104,7 @@ The AppImage is one file that contains the program, Python and the dashboard. Yo
 
    It looks for BeamNG.drive's user folder by itself. If it cannot find it, name the folder: `--install-mod /path/to/BeamNG.drive` (in the game launcher, **Manage User Folder** opens it). It never replaces a link, and it only replaces an earlier *copy* of the mod, never a folder it does not recognise. A copy installed under an earlier name of this program is removed too, otherwise the game would load both and every packet would be sent twice. Then **remove your car and spawn it again** so the game loads the mod.
 
-3. Start the game, get into a car, and the gauges come alive.
+4. Start the game, get into a car, and the gauges come alive.
 
 Things to know about the AppImage:
 
@@ -162,16 +171,18 @@ py -m venv .venv
 Try it without the game first. The simulator drives a fake car through gears, braking, tyre punctures and damage, so every dashboard comes alive:
 
 ```sh
-.venv/bin/python relay/run.py --simulate      # Windows: .venv\Scripts\python relay\run.py --simulate
+./ThrashDash-0.1.0-x86_64.AppImage --simulate                 # the AppImage
+.venv/bin/python relay/run.py --simulate                      # from the source (Windows: .venv\Scripts\python relay\run.py --simulate)
 ```
 
-A dashboard window opens by itself. (From the AppImage: `./ThrashDash-0.1.0-x86_64.AppImage --simulate`.) Then, for real:
+A dashboard window opens by itself. Then, for real:
 
-1. Start BeamNG and load a map.
-2. Start the relay: `.venv/bin/python relay/run.py`
-3. Get into a car. The window shows **Waiting for BeamNG...** until the first data arrives, then the gauges come alive.
+1. Install the mod once (see [Installation](#installation)) and spawn your car after installing it.
+2. Start BeamNG and load a map.
+3. Start ThrashDash: run the AppImage, or from the source `.venv/bin/python relay/run.py`.
+4. Get into a car. The window shows **Waiting for BeamNG...** until the first data arrives, then the gauges come alive.
 
-Move the mouse over the window to see the **Dashboards** and **Edit** buttons. Drag the window to another monitor, resize it, and double-click it (or press F11) for fullscreen.
+Move the mouse over the window to see the **Dashboards** and **Edit** buttons. Drag the window to another monitor, resize it, and double-click it (or press F11) for fullscreen. With the AppImage, closing the last window quits the program.
 
 ## Using ThrashDash
 
@@ -204,7 +215,7 @@ Press **D** or click **Dashboards**. From top to bottom:
 - **The list**: Default first, then your own dashboards by name, then the built-in templates A to Z. Click one (or press its number) to load it into this window. A trash button deletes a saved dashboard; built-ins cannot be deleted.
 - **Look of this dashboard**: the four [looks](#looks-skins).
 - **Vehicle**: which car you are driving, *Use this dashboard for this vehicle*, *Switch automatically when the vehicle changes*, and *Follow the vehicle rules in this window*. See [per-vehicle dashboards](#per-vehicle-dashboards).
-- **Phones and other devices**: switch on network access and get the address and QR code. See [phones and tablets](#phones-and-tablets).
+- **Phones and other devices**: choose the PIN, switch on network access and get the address and QR code. See [phones and tablets](#phones-and-tablets).
 - **Use as default** and **New window** at the foot.
 
 ![The Dashboards menu](docs/screenshots/menu.png)
@@ -583,13 +594,21 @@ To try it without the game: `python relay/run.py --sim-vehicles etkc,midtruck --
 
 ### Phones and tablets
 
-Open the Dashboards menu, find **Phones and other devices** and tick **Serve to devices on my network**. It takes effect at once (no restart) and is remembered. The menu then shows the address, for example `http://192.168.1.20:8765/?d=minimal`, and a **QR code**: point the phone's camera at it, or type the address. The QR code opens the dashboard you currently have open. You can also start the relay with `--lan`.
+Open the Dashboards menu and find **Phones and other devices**.
+
+1. **Choose a PIN** (4 to 8 digits) and press **Save PIN**. Network access cannot be switched on without one.
+2. Tick **Serve to devices on my network**. It takes effect at once (no restart) and is remembered. The menu then shows the address, for example `http://192.168.1.20:8765/?d=minimal`, and a **QR code**.
+3. On the phone, **scan the QR code** with its camera: it signs in at once, with no typing, and opens the dashboard you have open. Or type the address into the phone's browser: it asks for the PIN.
+
+A phone stays signed in for **30 days**, so the PIN is asked once per phone. The QR code carries a sign-in token that works **once and for about 5 minutes**: it is a fresh one each time you open the menu, so for a second phone close and reopen the menu. Saving a new PIN (even the same one) signs every phone out at once. A device that gets the PIN wrong five times in a row is made to wait, and the wait doubles with each further miss.
 
 - The phone and the computer must be on the same network. Guest networks that isolate devices, and some routers' "AP isolation", block this.
 - **Firewall:** ThrashDash only opens its own port (8765 unless you changed it). It does not read or change any firewall setting. If a phone shows "unable to connect" while the address is right, the computer's firewall is most likely not letting other devices reach that port, and whether to allow it is a decision for whoever administers the computer. Some systems, such as Windows, ask the first time a program starts listening.
-- A phone can **look but not touch**: no Edit button, no deleting, no vehicle rules, no default, no resetting trips, no opening windows. It can choose which dashboard to show and its own look, remembered on that phone only. Anyone on the same network can open the address and view your dashboards (the data is speed, rpm and the like), so switch it off on networks you do not trust.
+- A phone can **look but not touch**: no Edit button, no deleting, no vehicle rules, no default, no resetting trips, no opening windows. It can choose which dashboard to show and its own look, remembered on that phone only. A phone cannot read or change the PIN. Switch network access off on networks you do not trust.
+- **What the PIN does and does not do.** ThrashDash speaks plain http on your network, so the PIN and the sign-in cookie are not encrypted in transit. The PIN keeps out anyone who merely finds the address; it does not stop someone who can watch the network's traffic. The PIN is kept in `auth.json` in [the data folder](#where-things-are-stored), readable only by your user.
 - The built-in **Phone (portrait)** dashboard is laid out for an upright phone; the others suit a phone held sideways. On an iPhone, *Share, Add to Home Screen* gives a full-screen app. Phones may dim their screen, and browsers only allow keeping it awake on secure (https) pages, so set the phone's auto-lock to a longer time while driving.
-- To try the phone view without a phone: `python relay/run.py --simulate --lan` and open the printed address.
+- If you forget the PIN, open the Dashboards menu on the computer: it is shown in the PIN box, and you can change it there.
+- To try the phone view without a phone: start with `--simulate --lan`, choose a PIN in the menu on this computer, and open the printed address in another browser. Network access stays off until a PIN has been chosen.
 
 ### Remembered windows
 
@@ -618,6 +637,7 @@ Inside the data folder:
 | `settings.json` | Settings (below) |
 | `trips.json` | Trips A and B |
 | `windows.json` | The remembered windows |
+| `auth.json` | The PIN for devices on the network, and the secret that signs their sign-in cookies (readable only by your user) |
 | `thrashdash.log` | The program's messages (AppImage only, when started from a desktop; the latest run) |
 | `window-profiles/main/` | The dashboard windows' browser profile (so ThrashDash never touches your everyday browser) |
 
@@ -682,7 +702,14 @@ A look is deliberately not part of this file. Limits: 100 saved dashboards, and 
 
 ## Command line
 
-Run the relay with `.venv/bin/python relay/run.py [options]` (Windows: `.venv\Scripts\python relay\run.py`).
+The AppImage and the source take the same options:
+
+```sh
+./ThrashDash-0.1.0-x86_64.AppImage [options]                  # the AppImage
+.venv/bin/python relay/run.py [options]                       # from the source (Windows: .venv\Scripts\python relay\run.py)
+```
+
+The AppImage always adds `--quit-when-windows-close` for you, and prints `--version`, `--help` and `--install-mod` to wherever you ran it.
 
 | Option | Meaning |
 |:---|:---|
@@ -693,7 +720,7 @@ Run the relay with `.venv/bin/python relay/run.py [options]` (Windows: `.venv\Sc
 | `--udp-port PORT` | Port the mod sends to (default 4568). It must match `PORT` in the mod. |
 | `--no-window` | Do not open the dashboard window (and do not restore windows). |
 | `--browser PATH` | Chromium-based browser to use for the window. |
-| `--lan` | Serve to other devices on your network from the start (it can also be switched on from the menu). |
+| `--lan` | Serve to other devices on your network from the start (it can also be switched on from the menu). It needs a PIN: if none has been chosen yet it stays off until you choose one in the menu. |
 | `--quit-when-windows-close` | End ThrashDash a moment after the last dashboard window on this computer is closed (the AppImage uses this). With `--no-window` it only applies once a window has been opened. |
 | `--install-mod [PATH]` | Copy the BeamNG mod into the game's `mods/unpacked` folder and exit. `PATH` is the game's user folder if it cannot be found by itself. |
 | `--version` | Print the version. |
@@ -702,7 +729,7 @@ Run the relay with `.venv/bin/python relay/run.py [options]` (Windows: `.venv\Sc
 
 The relay serves the dashboard and a small JSON API on `http://127.0.0.1:8765`. The dashboard uses nothing else, and you can script against it.
 
-**Writes** (`PUT`, `POST`, `DELETE`) must carry the header `X-ThrashDash: 1` and come from this computer; anything else is refused with 403. See [Security](#security).
+**Writes** (`PUT`, `POST`, `DELETE`) must carry the header `X-ThrashDash: 1` and come from this computer; anything else is refused with 403. A device on the network (not this computer) must first have signed in with the PIN: until it has, every request except the PIN page and sign-in itself is refused with 401, and a browser is sent to the PIN page. See [Security](#security).
 
 | Method and path | Purpose |
 |:---|:---|
@@ -716,7 +743,11 @@ The relay serves the dashboard and a small JSON API on `http://127.0.0.1:8765`. 
 | `DELETE /api/layouts/{id}` | Delete one of yours, and forget its look, vehicle rules and default status. |
 | `GET /api/settings` | All [settings](#settings). |
 | `PUT /api/settings` | Change some settings (a partial object; unknown keys ignored). Switching `lan` takes effect immediately. |
-| `GET /api/client` | What the asking device may do: `{local, lan: {enabled, urls}}`. |
+| `GET /api/client` | What the asking device may do: `{local, pinSet, lan: {enabled, urls}}`. |
+| `GET /api/lan/pin` | The PIN, for this computer's menu only: `{set, pin}`. |
+| `PUT /api/lan/pin` | Choose the PIN (`{"pin": "4821"}`, 4 to 8 digits). Signs every phone out. This computer only. |
+| `POST /api/lan/token` | A single-use sign-in token for the QR code (`{token, expiresIn}`). This computer only. |
+| `POST /api/pin/login` | A device on the network signs in (`{"pin": "4821"}`); the answer sets the sign-in cookie. Wrong guesses are slowed down (429 with `Retry-After`). |
 | `POST /api/trips/{A\|B}/reset` | Reset a trip. |
 | `GET /api/windows` | The remembered windows and which are open now. |
 | `PUT /api/windows/{id}` | A window reports itself (used by the dashboard). |
@@ -774,6 +805,7 @@ The relay flattens nested tables into dotted channel names (`wheelThermals.FL.br
 | [`relay/thrashdash/store.py`](relay/thrashdash/store.py), [`validate.py`](relay/thrashdash/validate.py) | Layout and settings storage, and structural validation. |
 | [`relay/thrashdash/trip.py`](relay/thrashdash/trip.py), [`windows.py`](relay/thrashdash/windows.py) | The trip computer and the window memory. |
 | [`relay/thrashdash/lan.py`](relay/thrashdash/lan.py), [`netinfo.py`](relay/thrashdash/netinfo.py) | Network access and deciding who counts as "this computer". |
+| [`relay/thrashdash/auth.py`](relay/thrashdash/auth.py) | The PIN: storage, signed sign-in cookies, QR tokens and guess throttling. The check itself is in `guard` in [`server.py`](relay/thrashdash/server.py). |
 | [`relay/thrashdash/launcher.py`](relay/thrashdash/launcher.py) | Finds a Chromium-based browser and opens app windows (with a clean environment, so it works from inside a packaged app). |
 | [`relay/thrashdash/lifecycle.py`](relay/thrashdash/lifecycle.py), [`modinstall.py`](relay/thrashdash/modinstall.py) | Quitting when the last window closes, and `--install-mod`. |
 | [`packaging/`](packaging/) | Everything that builds the AppImage. |
@@ -845,13 +877,16 @@ luajit tests/lua/test_telemetry.lua                          # the mod, against 
 ThrashDash is designed to be safe to leave running on a home computer. In short: it listens on this computer only until you switch on network access, other devices can only look, and other websites cannot reach it.
 
 - **Local by default.** The relay listens on `127.0.0.1` only. When network access is on it also listens on this computer's *private* network addresses, one listener per address, never `0.0.0.0`, so VPN and public interfaces are not exposed. Switching it off closes them and drops connected devices.
-- **Devices on the network can only view.** Every change (layouts, settings, deleting, vehicle rules, trips, windows, even switching network access) needs this computer.
+- **Devices on the network need the PIN, and can then only view.** Until a device has signed in it is shown only the PIN page. Every change (layouts, settings, deleting, vehicle rules, trips, windows, even switching network access or reading the PIN) needs this computer.
+- **The PIN is compulsory.** Network access cannot be switched on without one, and if it were ever on without one, every device would be refused rather than let in.
+- **Guessing is slowed.** Five wrong PINs in a row from one device, then a wait that doubles with each further miss (up to an hour); and across all devices together, 30 wrong guesses in ten minutes make everyone wait a minute. Comparison takes the same time whether or not the first digits are right.
+- **Sign-in is a signed cookie** (`HttpOnly`, `SameSite=Strict`) good for 30 days; changing the PIN changes the signing secret, which signs every device out at once. The QR code's token is random, works once, and expires in 5 minutes; it is removed from the address as soon as it is used. The PIN page only ever sends a device to a path on this site.
 - **`Host` checking.** The `Host` header must name the relay: loopback names, and, only while network access is on, IP addresses or plain computer names (`my-pc`, `my-pc.local`). A public domain name is always refused, which stops a malicious web page using DNS rebinding to reach the relay through your own browser.
 - **`Origin` checking and write header.** Requests with a foreign `Origin` are refused, and writes must carry `X-ThrashDash`, a header no other website can send (browsers require a preflight that the relay never answers). Bodies are capped at 256 KB.
 - **Safe ids.** Dashboard, window and trip ids match strict patterns, so they can never point outside their folder.
 - **Strict page.** The page ships a strict Content-Security-Policy, loads nothing from the internet and builds its interface without `innerHTML`. Imported dashboards are checked twice (structure by the relay, meaning by the page).
 - **The mod** only reads vehicle data and sends UDP to localhost. It never writes files.
-- **Not provided:** network access has no password or https. Anyone on the same network can view your dashboards while it is on (the data is speed, rpm and similar). ThrashDash does not inspect or change the computer's firewall.
+- **Not provided:** https. The PIN and the sign-in cookie cross your network unencrypted, so the PIN keeps casual visitors out but does not protect against someone who can watch the traffic. The PIN is stored in plain text in `auth.json` (so this computer's menu can show it), readable only by your user. ThrashDash does not inspect or change the computer's firewall.
 
 ## Troubleshooting
 
@@ -868,6 +903,9 @@ ThrashDash is designed to be safe to leave running on a home computer. In short:
 | I updated the mod but nothing changed | Vehicles load the mod when they are **spawned**. Remove the car and spawn it again. Ctrl+L is not enough. |
 | Tyres, damage or states are empty | They come from the mod's slow packets: respawn the car after updating the mod. Some cars have no tyre or state data. |
 | Fuel used, economy and range show `--` | The mod has not reported the energy type: respawn the car. The percentage of tank used shows meanwhile. Economy and range also need about half a kilometre of driving. |
+| A phone shows the PIN page | That is the PIN doing its job: enter the PIN shown in the Dashboards menu on the computer, or scan the QR code there. A sign-in lasts 30 days, and changing the PIN signs every phone out. |
+| A phone says "Too many wrong PINs" | It is made to wait after five wrong guesses in a row (a minute at first, then longer). Wait and try again with the PIN from the menu. |
+| The QR code does not sign a phone in | Its token works once and lasts about 5 minutes. Close and reopen the Dashboards menu for a fresh code (each phone needs its own). |
 | A phone shows "unable to connect" | Is network access switched on, are both devices on the same network, and does the computer's firewall let the port through? That last one is for the computer's administrator. |
 | Windows reopen at the right size but not in the right place | Under Wayland programs cannot place windows. See [remembered windows](#remembered-windows) for the opt-in X11 mode. |
 | An imported dashboard is refused | The message names the property at fault. Layouts must be `format: 1` and within the [limits](#the-layout-format). |
@@ -878,7 +916,7 @@ ThrashDash is designed to be safe to leave running on a home computer. In short:
 - **Windows is untested.** The code is written to work there (paths, launching, positions), and the mod's install path is a best guess. There is an AppImage for Linux (x86_64) but no packaged Windows build yet, though the same PyInstaller recipe should produce one.
 - **Electric and hybrid cars** are covered by tests but have not been tried in the real game. Hybrids show the percentage of tank or battery used, not litres or kWh.
 - **Wayland** cannot restore window positions without the opt-in X11 mode.
-- **Network access** has no password and no https, and phones cannot keep the screen awake without https.
+- **Network access** is protected by a PIN but not encrypted (no https), so it deters casual visitors rather than someone watching the network; and phones cannot keep the screen awake without https.
 - **Alerts** are a banner only: no sound.
 - **Looks** cannot yet be made from your own images, and the graph and text widgets are not restyled by the looks.
 - **No camera views.** Showing the game's camera views in a separate window was investigated and dropped: the game offers no fast way to read the picture back, so only a few frames per second were possible.

@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -862,13 +863,21 @@ async def scenarios(b, shots):
             try:
                 urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=1)
                 return proc
+            except urllib.error.HTTPError:
+                return proc  # it answered (a phone-mode relay says 401 until a PIN is entered): it is up
             except OSError:
                 time.sleep(0.2)
         proc.kill()
         raise RuntimeError("relay did not start")
 
-    def get_json(url):
-        with urllib.request.urlopen(url, timeout=3) as r:
+    def get_json(url, cookie=None):
+        req = urllib.request.Request(url, headers={"Cookie": cookie} if cookie else {})
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return json.load(r)
+
+    def put_json(url, body):
+        req = urllib.request.Request(url, method="PUT", data=json.dumps(body).encode(), headers={"X-ThrashDash": "1", "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=3) as r:
             return json.load(r)
 
     NET = 8783
@@ -888,6 +897,22 @@ async def scenarios(b, shots):
         except OSError:
             reachable_before = False
         check("nothing is listening on the network address yet", not reachable_before)
+        check("it says a PIN is needed, and the switch is disabled until there is one", "Save a PIN above" in await b.eval("document.getElementById('dash-menu').textContent") and await b.eval("[...document.querySelectorAll('#dash-menu .dm-action')].find(a => a.textContent.includes('Serve to devices')).disabled") is True)
+        # typing a PIN with REAL keystrokes: the digits 1-9 pick dashboards in this menu, and must not while a field has focus
+        await b.click_el("#dash-menu .dm-pin-input")
+        await b.type_text("4821")
+        await p.settle(0.4)
+        check("typing digits into the PIN field does not switch dashboard", "d=default" in await b.eval("location.search") and await b.eval("document.querySelector('#dash-menu .dm-pin-input').value") == "4821")
+        await b.eval("(() => { const i = document.querySelector('#dash-menu .dm-pin-input'); i.value = '12'; })()")
+        await p.click_text("#dash-menu .dm-action", "Save PIN")
+        await p.settle(0.6)
+        check("a PIN that is too short is refused with a message", "4 to 8 digits" in await b.eval("document.getElementById('dash-menu').textContent") and get_json(B3 + "/api/lan/pin")["set"] is False)
+        await b.click_el("#dash-menu .dm-pin-input")
+        await b.type_text("4821")
+        await p.click_text("#dash-menu .dm-action", "Save PIN")
+        await p.settle(0.8)
+        check("a good PIN is saved", get_json(B3 + "/api/lan/pin") == {"set": True, "pin": "4821"})
+        check("...and the menu shows it, and now lets network access be switched on", await b.eval("document.querySelector('#dash-menu .dm-pin-input').value") == "4821" and await b.eval("[...document.querySelectorAll('#dash-menu .dm-action')].find(a => a.textContent.includes('Serve to devices')).disabled") is False)
         await p.click_text("#dash-menu .dm-action", "Serve to devices")
         await p.settle(1.0)
         check("switching it on works immediately (no restart)", get_json(f"http://127.0.0.2:{NET}/api/layouts")["layouts"][0]["id"] == "default")
@@ -895,7 +920,11 @@ async def scenarios(b, shots):
         check("it shows a QR code for the address", await p.count("#dash-menu .dm-net svg") == 1 and f"127.0.0.2:{NET}" in await b.eval("document.querySelector('#dash-menu .dm-net svg').getAttribute('aria-label')"))
         check("the QR code opens THIS dashboard on the phone (?d=default)", "?d=default" in await b.eval("document.querySelector('#dash-menu .dm-net svg').getAttribute('aria-label')"))
         check("the address is also written out to type", f"http://127.0.0.2:{NET}/?d=default" in await b.eval("[...document.querySelectorAll('#dash-menu .dm-url')].map(e => e.textContent).join('|')"))
-        check("the menu warns who can see it and who can change it", "Only this computer can change them" in await b.eval("document.getElementById('dash-menu').textContent"))
+        qr_label = await b.eval("document.querySelector('#dash-menu .dm-net svg').getAttribute('aria-label')")
+        check("the QR code carries a sign-in token, so scanning it needs no typing...", re.search(r"[?&]t=[A-Za-z0-9_-]{20,}", qr_label) is not None, qr_label)
+        check("...but the address written out for typing has none (it asks for the PIN)", "t=" not in await b.eval("[...document.querySelectorAll('#dash-menu .dm-url')].map(e => e.textContent).join('|')"))
+        menu_now = await b.eval("document.getElementById('dash-menu').textContent")
+        check("the menu explains the PIN, the QR code, signing out, and that the PIN is not encrypted", "Only this computer can change anything" in menu_now and "unencrypted" in menu_now and "signs every phone out" in menu_now)
         menu_text = await b.eval("document.getElementById('dash-menu').textContent")
         check("it leaves the firewall to the administrator: a plain note, no commands, no probing", "system administrator" in menu_text and "sudo" not in menu_text and "firewall-cmd" not in menu_text and await p.count("#dash-menu .dm-warn, #dash-menu .dm-cmd") == 0)
         check("the choice is remembered in the settings", get_json(B3 + "/api/settings")["lan"] is True)
@@ -916,6 +945,7 @@ async def scenarios(b, shots):
     relay4 = start_relay(NET + 1, "--debug-lan-address", "192.0.2.99")  # an address this computer does not have: binding must fail
     try:
         B4 = f"http://127.0.0.1:{NET + 1}"
+        put_json(B4 + "/api/lan/pin", {"pin": "4821"})  # (network access cannot be switched on without one)
         await b.goto(B4 + "/?d=default", wait=1.8)
         await b.move(500, 300)
         await p.settle(0.3)
@@ -930,13 +960,34 @@ async def scenarios(b, shots):
         relay4.wait(timeout=5)
 
     print("\n== a phone on the network (simulated): can look, cannot touch")
-    relay5 = start_relay(NET + 2, "--lan", "--debug-lan-address", "127.0.0.2", "--debug-treat-clients-as-remote")
+    relay5 = start_relay(NET + 2, "--lan", "--debug-pin", "4821", "--debug-lan-address", "127.0.0.2", "--debug-treat-clients-as-remote")
     try:
         PH = f"http://127.0.0.2:{NET + 2}"
+        # this script's own reads of that relay need the PIN too, like any other device on the network
+        login = urllib.request.Request(PH + "/api/pin/login", method="POST", data=json.dumps({"pin": "4821"}).encode(), headers={"X-ThrashDash": "1", "Content-Type": "application/json"})
+        with urllib.request.urlopen(login, timeout=3) as r:
+            phone_cookie = r.headers["Set-Cookie"].split(";")[0]
         await b.resize(390, 844)  # a phone
         b.console.clear()
         b.errors.clear()
-        await b.goto(PH + "/?d=phone", wait=2.5)
+        try:
+            urllib.request.urlopen(f"{PH}/api/layouts", timeout=2)
+            data_without_pin = True
+        except urllib.error.HTTPError as e:
+            data_without_pin = e.code != 401
+        check("a device that has not entered the PIN gets no data", not data_without_pin)
+        await b.goto(PH + "/?d=phone", wait=1.8)
+        check("it is shown the PIN page, which remembers where it was going", (await b.eval("location.pathname")) == "/pin.html" and "d=phone" in await b.eval("decodeURIComponent(location.search)") and await p.count("#pin") == 1)
+        await b.click_el("#pin")
+        await b.type_text("1111")
+        await b.key("Enter")
+        await p.settle(1.0)
+        check("a wrong PIN is refused with a message, and it stays on the PIN page", "Wrong PIN" in await p.text("#message") and (await b.eval("location.pathname")) == "/pin.html")
+        await b.click_el("#pin")
+        await b.type_text("4821")
+        await p.click_text("#go", "Sign in")
+        await p.settle(2.5)
+        check("the right PIN signs it in and takes it to the dashboard it wanted", (await b.eval("location.pathname")) == "/" and "d=phone" in await b.eval("location.search"))
         check("the dashboard loads over the network address", await p.count("#widgets > .w") == 12)
         check("it fits a phone-sized screen", (await b.rect("#canvas"))["w"] <= 390.5 and (await b.rect("#canvas"))["h"] <= 844.5)
         r1 = await b.eval("[...document.querySelectorAll('#widgets .g-needle-group')].map(e => e.style.transform).join('|')")
@@ -957,19 +1008,19 @@ async def scenarios(b, shots):
         await p.click_text("#dash-menu .dm-skin", "Backlit")
         await p.settle(0.8)
         check("a remote device can choose its own look", await p.count("#widgets .sk-backlit") > 0)
-        check("...which is kept on that device only", await b.eval("localStorage.getItem('thrashdash.skin.phone')") == "backlit" and get_json(PH + "/api/settings")["skins"] == {})
+        check("...which is kept on that device only", await b.eval("localStorage.getItem('thrashdash.skin.phone')") == "backlit" and get_json(PH + "/api/settings", phone_cookie)["skins"] == {})
         await b.goto(PH + "/?d=phone", wait=2.0)
         check("...and survives a reload", await p.count("#widgets .sk-backlit") > 0)
         status = await b.eval("fetch('/api/settings', {method: 'PUT', headers: {'X-ThrashDash': '1', 'Content-Type': 'application/json'}, body: JSON.stringify({units: {speed: 'mph'}})}).then(r => r.status)")
         check("the relay refuses a change from a remote device", status == 403, str(status))
-        check("...and the setting did not change", get_json(PH + "/api/settings")["units"]["speed"] == "kmh")
+        check("...and the setting did not change", get_json(PH + "/api/settings", phone_cookie)["units"]["speed"] == "kmh")
         await p.shot("phone-backlit")
         await b.goto(PH + "/?d=trip", wait=2.5)
         check("a phone shows the trip numbers but has no Reset button", await p.count("#widgets .w-trip") == 2 and await p.count("#widgets .tr-reset") == 0 and "--" != await b.eval("document.querySelector('.w-trip .tr-value').textContent"))
         status = await b.eval("fetch('/api/trips/A/reset', {method: 'POST', headers: {'X-ThrashDash': '1'}}).then(r => r.status)")
         check("...and the relay refuses a trip reset from a phone", status == 403, str(status))
         await asyncio.sleep(1.0)
-        check("a phone is never remembered as a window", get_json(PH + "/api/windows")["windows"] == {} and get_json(PH + "/api/windows")["live"] == [])
+        check("a phone is never remembered as a window", get_json(PH + "/api/windows", phone_cookie)["windows"] == {} and get_json(PH + "/api/windows", phone_cookie)["live"] == [])
         real_errors = [m for m in b.console if m[0] == "error" and "403" not in m[1]]
         check("no errors on the remote device", not real_errors and not b.errors, str(real_errors[:2]))
     finally:

@@ -164,6 +164,11 @@ body.editing #top-controls { display: none; }
 .dm-net svg { flex: none; border-radius: 6px; }
 .dm-urls { min-width: 0; }
 .dm-url { margin-top: 4px; font-size: 11px; color: var(--accent); word-break: break-all; user-select: text; }
+.dm-pin { display: flex; gap: 6px; padding: 2px 6px 4px; }
+.dm-pin-input { flex: 1 1 auto; min-width: 0; padding: 6px 8px; font: 600 15px var(--font); letter-spacing: 0.25em; color: var(--text); background: var(--bg); border: 1px solid var(--track); border-radius: 6px; outline: none; }
+.dm-pin-input:focus { border-color: var(--accent); }
+.dm-pin-save { flex: none; white-space: nowrap; }
+.dm-pin-status { color: var(--accent); }
 .dm-note { padding: 2px 8px 4px; color: var(--muted); font-size: 11px; line-height: 1.35; }
 .dm-error { margin: 2px 8px 4px; padding: 6px 8px; border-radius: 6px; background: rgba(255, 77, 77, 0.12); color: #ff8a8a; font-size: 12px; line-height: 1.35; }
 .dm-foot { display: flex; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--track); }

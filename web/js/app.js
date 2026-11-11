@@ -489,6 +489,8 @@ function connect() {
     }
   };
   ws.onclose = () => {
+    // A phone whose sign-in has lapsed (30 days, or the PIN was changed) is refused here: reload to get the PIN page.
+    fetch("/api/status", { cache: "no-store" }).then((r) => r.status === 401 && location.reload(), () => {});
     latest = null;
     app.status = { ...app.status, connected: false };
     setState("offline", "ThrashDash relay not running", "Start the ThrashDash program. This window reconnects automatically.");
