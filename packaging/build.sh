@@ -41,6 +41,10 @@ chmod +x "$APPDIR/AppRun"
 cp packaging/thrashdash.desktop packaging/thrashdash.svg packaging/thrashdash.png "$APPDIR/"
 ln -s thrashdash.png "$APPDIR/.DirIcon"
 
+echo "== Licences of everything inside (they must travel with the program)"
+# also rewrites THIRD_PARTY_NOTICES.md in the repository, so it always describes what was really bundled
+"$VENV/bin/python" packaging/collect_licenses.py --internal "$APPDIR/usr/lib/thrashdash/_internal" --out "$APPDIR/usr/share/licenses/thrashdash" --update-repo-file
+
 download() {  # download URL FILE
     echo "downloading $1"
     if command -v curl >/dev/null; then curl -fsSL --max-time 300 -o "$2" "$1"; else wget -q -T 300 -O "$2" "$1"; fi

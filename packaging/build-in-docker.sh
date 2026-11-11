@@ -11,5 +11,5 @@ docker run --rm --security-opt label=disable -v "$ROOT":/src -w /src -e HOST_UID
     apt-get update -qq
     apt-get install -y -qq python3 python3-venv python3-pip binutils curl ca-certificates file >/dev/null
     bash packaging/build.sh
-    chown -R "$HOST_UID:$HOST_GID" build dist
+    chown -R "$HOST_UID:$HOST_GID" build dist THIRD_PARTY_NOTICES.md
 '
