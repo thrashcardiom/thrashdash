@@ -28,7 +28,8 @@ def candidate_user_folders(platform=None, home=None, env=None):
     env = os.environ if env is None else env
     if platform == "win32":
         base = Path(env.get("LOCALAPPDATA") or home / "AppData" / "Local")
-        return [base / "BeamNG" / "BeamNG.drive" / "current", base / "BeamNG.drive" / "current"]
+        # (unverified: where BeamNG puts its user folder on Windows; the older "Documents" location is tried last)
+        return [base / "BeamNG" / "BeamNG.drive" / "current", base / "BeamNG.drive" / "current", home / "Documents" / "BeamNG.drive"]
     data = Path(env.get("XDG_DATA_HOME") or home / ".local" / "share")
     return [data / "BeamNG" / "BeamNG.drive" / "current", data / "BeamNG.drive" / "current"]
 

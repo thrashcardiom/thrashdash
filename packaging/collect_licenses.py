@@ -18,6 +18,8 @@ Usage: collect_licenses.py --internal DIR --out DIR [--update-repo-file]
 """
 import argparse
 import hashlib
+import os
+import platform
 import re
 import shutil
 import subprocess
@@ -27,8 +29,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Native libraries PyInstaller bundles, by file name prefix: (component, licence, where it comes from).
-NATIVE = {
+# Native libraries PyInstaller bundles, by file name prefix: (component, licence, where it comes from). Linux first.
+NATIVE_LINUX = {
     "libpython3": ("Python runtime (libpython)", "PSF-2.0", "https://www.python.org/"),
     "libssl.so": ("OpenSSL 3", "Apache-2.0", "https://www.openssl.org/"),
     "libcrypto.so": ("OpenSSL 3", "Apache-2.0", "https://www.openssl.org/"),
@@ -43,11 +45,42 @@ NATIVE = {
     "libstdc++.so": ("GNU C++ runtime library (libstdc++)", "GPL-3.0-or-later WITH GCC-exception-3.1", "https://gcc.gnu.org/"),
 }
 
+# The same for Windows (UNVERIFIED against a real Windows build: written from what python.org's Python ships; a library not
+# listed here stops the build with its name, so it can be added with its licence rather than shipped without one).
+MS_RUNTIME = ("Microsoft Visual C++ runtime", "Microsoft redistributable terms (https://visualstudio.microsoft.com/license-terms/)", "https://visualstudio.microsoft.com/")
+NATIVE_WINDOWS = [
+    (r"^python3\d*\.dll$", "Python runtime (python3xx.dll)", "PSF-2.0", "https://www.python.org/"),
+    (r"^(vcruntime140|msvcp140|concrt140|vcomp140)[_a-z0-9]*\.dll$", *MS_RUNTIME),
+    (r"^(ucrtbase\.dll|api-ms-win-.*\.dll)$", "Microsoft Universal C Runtime", MS_RUNTIME[1], "https://learn.microsoft.com/cpp/windows/universal-crt-deployment"),
+    (r"^(libssl|libcrypto)-3.*\.dll$", "OpenSSL 3", "Apache-2.0", "https://www.openssl.org/"),
+    (r"^libffi-\d+\.dll$", "libffi", "MIT", "https://sourceware.org/libffi/"),
+    (r"^sqlite3\.dll$", "SQLite", "Public domain", "https://www.sqlite.org/"),
+    (r"^[a-z0-9_]+\.pyd$", "Python standard library extension modules", "PSF-2.0", "https://www.python.org/"),
+]
+
 LICENCE_FILE = re.compile(r"^(licen[cs]e|copying|notice|authors)([-_.].*)?$", re.I)
 
 
 def read_text(path):
     return Path(path).read_text(encoding="utf-8", errors="replace").strip("\n")
+
+
+def classify_native(filename, platform_name=None):
+    """(component, licence, home) for a native file PyInstaller bundled, or None if it is not one this script knows."""
+    platform_name = platform_name or sys.platform
+    if platform_name == "win32":
+        for pattern, component, licence, url in NATIVE_WINDOWS:
+            if re.match(pattern, filename, re.I):
+                return component, licence, url
+        return None
+    return next((v for k, v in NATIVE_LINUX.items() if filename.startswith(k)), None)
+
+
+def native_files(internal, platform_name=None):
+    """The native libraries in the top of PyInstaller's bundle folder."""
+    windows = (platform_name or sys.platform) == "win32"
+    wanted = (lambda n: n.lower().endswith((".dll", ".pyd"))) if windows else (lambda n: ".so" in n)
+    return sorted(p for p in Path(internal).iterdir() if p.is_file() and wanted(p.name))
 
 
 def requirement_names(lines, env):
@@ -77,7 +110,7 @@ def runtime_packages():
     """The distributions the program needs at run time: those in requirements.txt and, recursively, what they require."""
     from_requirements = re.findall(r"^([A-Za-z0-9_.-]+)", (ROOT / "requirements.txt").read_text(), re.M)
     env = {"python_version": "%d.%d" % sys.version_info[:2], "python_full_version": sys.version.split()[0], "sys_platform": sys.platform,
-           "platform_system": "Linux", "implementation_name": sys.implementation.name, "os_name": "posix"}
+           "platform_system": platform.system(), "implementation_name": sys.implementation.name, "os_name": os.name}
     seen, queue = {}, list(from_requirements)
     while queue:
         name = queue.pop()
@@ -176,10 +209,10 @@ def main():
     # ---- native libraries ----
     internal = Path(args.internal)
     native_rows, seen_components = [], set()
-    for lib in sorted(p for p in internal.iterdir() if p.is_file() and ".so" in p.name):
-        match = next((v for k, v in NATIVE.items() if lib.name.startswith(k)), None)
+    for lib in native_files(internal):
+        match = classify_native(lib.name)
         if match is None:
-            problems.append(f"UNKNOWN native library {lib.name}: add it to NATIVE in packaging/collect_licenses.py with its licence")
+            problems.append(f"UNKNOWN native library {lib.name}: add it to the tables in packaging/collect_licenses.py with its licence")
             native_rows.append((lib.name, "UNKNOWN", "UNKNOWN", ""))
             continue
         component, licence, url = match
@@ -195,8 +228,12 @@ def main():
             problems.append(f"no copyright file found for {lib.name} (package: {package or 'unknown'})")
     if not any((out / "system-libraries").iterdir()):
         (out / "system-libraries" / "README.txt").write_text(
-            "The libraries listed in THIRD_PARTY_NOTICES.md come from the operating system the program was built on; on Debian and "
+            "The libraries listed in THIRD_PARTY_NOTICES.md come from the Python installation the program was built with (on Windows, "
+            "python.org's, whose LICENSE.txt is python-LICENSE.txt in the folder above) and from the operating system; on Debian and "
             "Ubuntu their copyright files are copied here when the program is built. This build was not made on such a system.\n")
+    python_licence = Path(sys.base_prefix) / "LICENSE.txt"  # python.org's installers ship it (Windows); Linux distributions use the copyright files
+    if python_licence.is_file():
+        shutil.copy(python_licence, out / "python-LICENSE.txt")
 
     # ---- PyInstaller, fonts ----
     try:
@@ -213,8 +250,9 @@ def main():
           "ThrashDash itself is released under the MIT licence (see [LICENSE](LICENSE)). The packaged program (the AppImage)",
           "also contains the software listed here, which has its own licences. This file is generated by",
           "`packaging/collect_licenses.py` from what was actually bundled; the complete licence texts, and the Linux distribution's",
-          "own copyright files for the system libraries, are inside the AppImage under `usr/share/licenses/thrashdash/`",
-          "(`./ThrashDash-<version>-x86_64.AppImage --appimage-extract 'usr/share/licenses/*'` unpacks them).", "",
+          "own copyright files for the system libraries, travel with it: " + (
+              "in the `licenses` folder next to the program." if sys.platform == "win32" else
+              "inside the AppImage under `usr/share/licenses/thrashdash/` (`./ThrashDash-<version>-x86_64.AppImage --appimage-extract 'usr/share/licenses/*'` unpacks them)."), "",
           "## Python packages", "", "| Package | Version | Licence | Home |", "|:---|:---|:---|:---|"]
     md += [f"| {n} | {v} | {l} | {h} |" for n, v, l, h in rows]
     md += ["", "## Native libraries bundled with the Python runtime", "",

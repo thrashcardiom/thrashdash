@@ -66,7 +66,7 @@ Why it is built this way: the game stays untouched apart from one small mod, the
 | | The AppImage | From the source |
 |:---|:---|:---|
 | **Game** | BeamNG.drive (tested on 0.40.5, native Linux build) | the same |
-| **Operating system** | Linux, x86_64, any distribution from about 2022 on | Linux, or Windows (untested); anything Python runs on |
+| **Operating system** | Linux, x86_64, any distribution from about 2022 on. A Windows 10/11 64-bit zip is built from the same code (see Option B below; untested). | Linux, or Windows (untested); anything Python runs on |
 | **Python** | Not needed: it is inside the AppImage | 3.10 or newer (developed on 3.13), plus [`aiohttp`](https://docs.aiohttp.org/) 3.9 or newer |
 | **Browser** | A Chromium-based browser for the borderless app window: Chrome, Edge, Brave or Chromium. Without one, the dashboard opens in your default browser. | the same (Edge comes with Windows) |
 | **Optional** | | Node.js 22+ and LuaJIT, only to run the tests; `fonttools`, `brotli` and `qrcode` (see `requirements-dev.txt`) only for developer tools |
@@ -75,7 +75,7 @@ Other browsers can open the dashboard at its address but are untested.
 
 ## Installation
 
-There are two ways to get ThrashDash: the single-file **AppImage** for Linux, which needs nothing installed except a browser, or running it **from the source** on any system that has Python.
+There are three ways to get ThrashDash: the single-file **AppImage** for Linux, a **zip for Windows**, or running it **from the source** on any system that has Python. The first two need nothing installed except a browser.
 
 ### Option A: the AppImage (Linux)
 
@@ -114,7 +114,30 @@ Things to know about the AppImage:
 - It needs FUSE to run, like all AppImages. If it will not start, try `./ThrashDash-0.1.0-x86_64.AppImage --appimage-extract-and-run`, or install FUSE 2 (`libfuse2`).
 - To update, replace the file and run `--install-mod` again if the release notes say the mod changed.
 
-### Option B: from the source
+### Option B: the Windows zip
+
+> [!NOTE]
+> The Windows program is built from the same code, but it has not been run on Windows yet. Expect rough edges and please report them.
+
+Download `ThrashDash-<version>-windows-x64.zip` from the project's [Releases page](https://github.com/thrashcardiom/thrashdash/releases) (or build it yourself: [Building the Windows program](#building-the-windows-program)), unzip it anywhere, and open the folder. It uses Microsoft Edge, Chrome or Brave for the dashboard window; Edge comes with Windows.
+
+1. **Install the mod** into the game. In PowerShell or cmd, in the unzipped folder:
+
+   ```bat
+   .\thrashdash-cli.exe --install-mod
+   ```
+
+   `thrashdash-cli.exe` is the same program with a console window, for commands that print something (`--help`, `--version`, `--install-mod`). It looks for BeamNG.drive's user folder by itself; if it cannot find it, name the folder: `--install-mod "C:\path\to\BeamNG.drive"` (in the game launcher, **Manage User Folder** opens it). Then **remove your car and spawn it again**.
+2. **Double-click `thrashdash.exe`.** A dashboard window opens. Closing the last dashboard window quits ThrashDash (add `--keep-running` to stop that). Try it without the game first: `.\thrashdash-cli.exe --simulate`.
+3. Start the game and get into a car.
+
+Things to know:
+
+- **Windows SmartScreen** may say "Windows protected your PC" the first time, and some antivirus programs distrust any program made with PyInstaller. The program is not code-signed. Choose *More info, Run anyway*, or check the file against the checksum on the Releases page.
+- **Windows Defender Firewall** asks the first time if ThrashDash may accept connections, when you switch on network access for phones. That is Windows' own question, and your decision.
+- **Messages** from `thrashdash.exe` (which has no console window) go to `thrashdash.log` in `%LOCALAPPDATA%\ThrashDash`; the same folder holds your dashboards and settings.
+
+### Option C: from the source
 
 The rest of this section is for running from the source code.
 
@@ -721,6 +744,7 @@ The AppImage always adds `--quit-when-windows-close` for you, and prints `--vers
 | `--no-window` | Do not open the dashboard window (and do not restore windows). |
 | `--browser PATH` | Chromium-based browser to use for the window. |
 | `--lan` | Serve to other devices on your network from the start (it can also be switched on from the menu). It needs a PIN: if none has been chosen yet it stays off until you choose one in the menu. |
+| `--keep-running` | Packaged programs (the AppImage and the Windows exe) quit when the last dashboard window closes; this keeps them running until they are stopped. |
 | `--quit-when-windows-close` | End ThrashDash a moment after the last dashboard window on this computer is closed (the AppImage uses this). With `--no-window` it only applies once a window has been opened. |
 | `--install-mod [PATH]` | Copy the BeamNG mod into the game's `mods/unpacked` folder and exit. `PATH` is the game's user folder if it cannot be found by itself. |
 | `--version` | Print the version. |
@@ -808,7 +832,8 @@ The relay flattens nested tables into dotted channel names (`wheelThermals.FL.br
 | [`relay/thrashdash/auth.py`](relay/thrashdash/auth.py) | The PIN: storage, signed sign-in cookies, QR tokens and guess throttling. The check itself is in `guard` in [`server.py`](relay/thrashdash/server.py). |
 | [`relay/thrashdash/launcher.py`](relay/thrashdash/launcher.py) | Finds a Chromium-based browser and opens app windows (with a clean environment, so it works from inside a packaged app). |
 | [`relay/thrashdash/lifecycle.py`](relay/thrashdash/lifecycle.py), [`modinstall.py`](relay/thrashdash/modinstall.py) | Quitting when the last window closes, and `--install-mod`. |
-| [`packaging/`](packaging/) | Everything that builds the AppImage. |
+| [`relay/thrashdash/output.py`](relay/thrashdash/output.py) | Where messages go when there is no console (the Windows exe). |
+| [`packaging/`](packaging/) | Everything that builds the AppImage (`build.sh`, `build-in-docker.sh`) and the Windows zip (`build.ps1`, `build-windows.bat`). |
 | [`web/js/app.js`](web/js/app.js) | The page: loading, scaling, switching, windows, the data loop. |
 | [`web/js/widgets/`](web/js/widgets/) | One file per widget, plus `index.js` (the registry). |
 | [`web/js/skins/`](web/js/skins/) | The looks: themes, dials, parts, icons. |
@@ -831,6 +856,20 @@ Either produces `dist/ThrashDash-<version>-x86_64.AppImage` (about 14 MB). The s
 - **What it downloads**: PyInstaller from PyPI, and `appimagetool` and its runtime from the AppImage project's GitHub releases. Their checksums are printed during the build. Nothing else is fetched, and everything it makes stays in `build/` and `dist/`.
 - **`AppRun`** starts the program with `--quit-when-windows-close`, and keeps its output in `thrashdash.log` when there is no terminal. Commands that just print and exit (`--version`, `--help`, `--install-mod`) always print to where you ran them.
 - **What is not inside**: a browser, and the game. A Windows build (`.exe`) from the same PyInstaller recipe is planned but not done.
+
+### Building the Windows program
+
+On a Windows 10/11 64-bit machine with **Python 3.10 to 3.13** from [python.org](https://www.python.org/downloads/) (keep the *py launcher* option ticked) and nothing else: every package has a ready-made Windows build, so **no compiler or Visual Studio is needed**.
+
+```bat
+packaging\build-windows.bat
+```
+
+(or `powershell -ExecutionPolicy Bypass -File packaging\build.ps1`). It makes a Python environment under `build\`, freezes the program with PyInstaller using the same `packaging/thrashdash.spec` as the Linux build, and writes `dist\ThrashDash-<version>-windows-x64.zip` with its checksum.
+
+- **Two programs share one folder:** `thrashdash.exe` has no console window (what you double-click; its messages go to `thrashdash.log`), and `thrashdash-cli.exe` is the same program with a console, for `--help`, `--version` and `--install-mod`.
+- **Licences travel with it:** the build runs [`packaging/collect_licenses.py`](packaging/collect_licenses.py), which puts every bundled package's licence in a `licenses` folder next to the program, and **stops** if the bundle contains a DLL it does not know. If that happens, the message names the file: add it, with its licence, to `NATIVE_WINDOWS` in that script. (The Windows table was written without a Windows build to check against, so expect to add an entry or two the first time.)
+- **Not yet run on Windows.** The script was written on Linux, where it cannot be executed; the logic it relies on is tested there, but the first real build may need small fixes.
 
 ### Running the tests
 
@@ -896,6 +935,8 @@ ThrashDash is designed to be safe to leave running on a home computer. In short:
 | Nothing opens when I start the relay | No Chromium-based browser was found. Pass `--browser /path/to/browser`, or open `http://127.0.0.1:8765/` yourself. |
 | *Cannot listen on port 8765* | Another ThrashDash (or program) is using it. Stop it, or pass `--http-port`. |
 | *Cannot listen for BeamNG on UDP port 4568* | Another listener has the port (a second ThrashDash, or `spike_listen.py`). |
+| Windows says "Windows protected your PC" | The program is not code-signed. *More info*, then *Run anyway*, or check the zip against the checksum on the Releases page. |
+| On Windows nothing seems to happen when I double-click `thrashdash.exe` | It has no console window. Look at `thrashdash.log` in `%LOCALAPPDATA%\ThrashDash`. For commands that print something, use `thrashdash-cli.exe`. |
 | The AppImage will not start | AppImages need FUSE. Try `./ThrashDash-...AppImage --appimage-extract-and-run`, or install `libfuse2`. Make sure the file is executable (`chmod +x`). |
 | I started the AppImage and nothing seems to happen | Look at `thrashdash.log` in the data folder. If there is no Chromium-based browser it opens your default browser instead. It quits by itself after about a minute and a half if no window opens. |
 | The AppImage quit and I did not want it to | It ends when the last dashboard window closes. Keep one open, or run from the source (`python relay/run.py`), which keeps running until you stop it. |
@@ -913,7 +954,7 @@ ThrashDash is designed to be safe to leave running on a home computer. In short:
 
 ## Known limitations
 
-- **Windows is untested.** The code is written to work there (paths, launching, positions), and the mod's install path is a best guess. There is an AppImage for Linux (x86_64) but no packaged Windows build yet, though the same PyInstaller recipe should produce one.
+- **Windows is untested.** There is a Windows build recipe (`packaging/build.ps1`) and the program is meant to run there as a zip with `thrashdash.exe`, but neither has been run on Windows yet. The code is written to work there (paths, launching, positions), and the folder it installs the mod into is a best guess. There is an AppImage for Linux (x86_64) but no packaged Windows build yet, though the same PyInstaller recipe should produce one.
 - **Electric and hybrid cars** are covered by tests but have not been tried in the real game. Hybrids show the percentage of tank or battery used, not litres or kWh.
 - **Wayland** cannot restore window positions without the opt-in X11 mode.
 - **Network access** is protected by a PIN but not encrypted (no https), so it deters casual visitors rather than someone watching the network; and phones cannot keep the screen awake without https.

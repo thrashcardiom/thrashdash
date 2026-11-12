@@ -11,6 +11,7 @@ from .lan import LanController, LanError
 from .lifecycle import QUIT_GRACE_S, STARTUP_TIMEOUT_S, QuitWatcher, quit_when_windows_close
 from .auth import AuthStore, valid_pin
 from .modinstall import install_mod
+from .output import ensure_output
 from .launcher import find_browser, open_in_default_browser, open_window, profile_in_use
 from .netinfo import is_local_client, lan_addresses
 from .paths import migrate_legacy_data, user_data_dir, web_root
@@ -34,6 +35,7 @@ def parse_args(argv=None):
     p.add_argument("--no-window", action="store_true", help="do not open the dashboard window automatically")
     p.add_argument("--browser", metavar="PATH", help="Chromium-based browser to use for the window (Chrome, Edge, Brave, Chromium)")
     p.add_argument("--quit-when-windows-close", action="store_true", help="end ThrashDash a moment after the last dashboard window is closed (what the packaged app uses, as it has no terminal to stop it in)")
+    p.add_argument("--keep-running", action="store_true", help="the packaged app ends when its last dashboard window is closed; this keeps it running until it is stopped")
     p.add_argument("--lan", action="store_true", help="serve to other devices on your network (a phone or tablet) from the start; it can also be switched on from the Dashboards menu while running")
     p.add_argument("--debug-quit-grace", type=float, default=QUIT_GRACE_S, help=argparse.SUPPRESS)  # testing only: seconds to wait before quitting
     p.add_argument("--debug-quit-startup", type=float, default=STARTUP_TIMEOUT_S, help=argparse.SUPPRESS)  # testing only: seconds to wait for a first window
@@ -146,7 +148,17 @@ async def report_windows(windows, settings, launch, base_url, browser):
     print(f"  window{'s' if opened != 1 else ' '}  : {opened} opened with {browser}")
 
 
+def apply_packaged_defaults(args, frozen=None):
+    """A packaged app (the AppImage, the Windows exe) is started by double-clicking, with no terminal to press Ctrl-C in, so it
+    ends when its last dashboard window closes unless told not to (--keep-running). Run from the source it keeps running."""
+    frozen = getattr(sys, "frozen", False) if frozen is None else frozen
+    if frozen and not args.keep_running:
+        args.quit_when_windows_close = True
+    return args
+
+
 def main(argv=None):
+    ensure_output()  # first: a program without a console (the Windows exe) has no stdout, and argparse and print need one
     # Messages must reach a log file (or a pipe) as they happen, not when a buffer fills: when ThrashDash is started from a
     # desktop its output goes to thrashdash.log, which would otherwise stay empty until it ends.
     for stream in (sys.stdout, sys.stderr):
@@ -154,7 +166,7 @@ def main(argv=None):
             stream.reconfigure(line_buffering=True)
         except (AttributeError, ValueError):
             pass
-    args = parse_args(argv)
+    args = apply_packaged_defaults(parse_args(argv))
     if args.install_mod is not None:
         return install_mod(args.install_mod or None)
     try:
