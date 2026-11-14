@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { interpolateFeed, liveReadout, advanceLive, nextAutoOpen, turnToward, WHEN_OPTIONS, filterOptions, filterRoutes, overviewTiles, routeTotals, routesBounds, REPLAY_RATES, advanceReplay, clockText, isOver, limitAt, replayReadout, RAMP, colourScaleTop, distanceAtTime, graphModel, niceTicks, routeRuns, sameTrip, sampleAtDistance, sampleAtTime, speedBucket, statTiles, tripTitle } from "../../web/js/trips/model.js";
+import { clampMapHeight, interpolateFeed, liveReadout, advanceLive, nextAutoOpen, turnToward, WHEN_OPTIONS, filterOptions, filterRoutes, overviewTiles, routeTotals, routesBounds, REPLAY_RATES, advanceReplay, clockText, isOver, limitAt, replayReadout, RAMP, colourScaleTop, distanceAtTime, graphModel, niceTicks, routeRuns, sameTrip, sampleAtDistance, sampleAtTime, speedBucket, statTiles, tripTitle } from "../../web/js/trips/model.js";
 import { buildPrefs } from "../../web/js/units.js";
 
 const prefs = buildPrefs({}, "");
@@ -314,4 +314,14 @@ test("the live readout shows what the car is doing now, and the limit and distan
   assert.equal(liveReadout(t, null, prefs).here, null);
   assert.equal(liveReadout({ points: [] }, { lat: 1, lon: 2 }, prefs).here, null);
   assert.equal(liveReadout(t, { lat: 1, lon: 2 }, prefs).here.h, t.points[4].h, "no heading from the feed: the recorded one");
+});
+
+test("a map's height stays between a usable minimum and the room the window has", () => {
+  assert.equal(clampMapHeight(100, 900), 200, "never shorter than 200");
+  assert.equal(clampMapHeight(520, 900), 520);
+  assert.equal(clampMapHeight(5000, 900), 760, "never taller than the window less 140");
+  assert.equal(clampMapHeight(5000, 250), 200, "a tiny window still gets the minimum");
+  assert.equal(clampMapHeight(NaN, 900), 200);
+  assert.equal(clampMapHeight(333.6, 900), 334, "whole pixels");
+  assert.equal(clampMapHeight(400, undefined), 400, "no window height known: a sensible one is assumed");
 });

@@ -196,12 +196,17 @@ export class Panel {
     this.restoreBox = h("input", "pr-check", this.restoreRow);
     this.restoreBox.type = "checkbox";
     h("span", "", this.restoreRow, "Reopen my windows when ThrashDash starts");
+    this.closeRow = h("label", "pr-check-row", win);
+    this.closeBox = h("input", "pr-check", this.closeRow);
+    this.closeBox.type = "checkbox";
+    h("span", "", this.closeRow, "Close my windows when ThrashDash closes");
+    h("p", "ed-note", win, "The dashboard windows and the map window ThrashDash opened are closed with it (and come back next time if the box above is ticked). Other devices on your network are not affected.");
     this.exactRow = h("label", "pr-check-row", win);
     this.exactBox = h("input", "pr-check", this.exactRow);
     this.exactBox.type = "checkbox";
     h("span", "", this.exactRow, "Place windows exactly");
     h("p", "ed-note", win, "Where a window goes is normally decided by the desktop (on Linux with Wayland, programs cannot choose). This option starts the dashboard windows in X11 mode so they can be put back exactly where they were. It applies the next time the dashboard windows are opened from scratch, after all of them have been closed.");
-    for (const [box, key] of [[this.restoreBox, "restoreWindows"], [this.exactBox, "exactWindowPlacement"]]) {
+    for (const [box, key] of [[this.restoreBox, "restoreWindows"], [this.closeBox, "closeWindowsOnExit"], [this.exactBox, "exactWindowPlacement"]]) {
       box.addEventListener("change", async () => {
         try {
           await this.manager.api.saveSettings({ [key]: box.checked });
@@ -349,6 +354,7 @@ export class Panel {
       return;
     }
     this.restoreBox.checked = settings.restoreWindows !== false;
+    this.closeBox.checked = settings.closeWindowsOnExit !== false;
     this.exactBox.checked = settings.exactWindowPlacement === true;
   }
 

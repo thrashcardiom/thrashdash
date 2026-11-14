@@ -1362,10 +1362,10 @@ async def scenarios(b, shots):
     sections = await b.eval("[...document.querySelectorAll('.ed-h2')].map(e => e.textContent)")
     check("the editor has a Windows section", "Windows" in sections, str(sections))
     boxes = await b.eval("[...document.querySelectorAll('.ed-section')].find(s => s.querySelector('.ed-h2').textContent === 'Windows').querySelectorAll('input').length")
-    check("with the two switches", boxes == 2)
+    check("with its three switches (reopen, close with ThrashDash, place exactly)", boxes == 3)
     now = api("GET", "/api/settings")
-    check("restoring is on by default and exact placement off", now["restoreWindows"] is True and now["exactWindowPlacement"] is False, str(now))
-    await b.eval("[...document.querySelectorAll('.ed-section')].find(s => s.querySelector('.ed-h2').textContent === 'Windows').querySelectorAll('input')[1].click()")
+    check("restoring and closing with ThrashDash are on by default and exact placement off", now["restoreWindows"] is True and now["closeWindowsOnExit"] is True and now["exactWindowPlacement"] is False, str(now))
+    await b.eval("[...document.querySelectorAll('.ed-section')].find(s => s.querySelector('.ed-h2').textContent === 'Windows').querySelectorAll('input')[2].click()")
     await p.settle(0.6)
     check("switching on exact placement is saved by the relay", api("GET", "/api/settings")["exactWindowPlacement"] is True)
     await b.eval("[...document.querySelectorAll('.ed-section')].find(s => s.querySelector('.ed-h2').textContent === 'Windows').querySelectorAll('input')[0].click()")
@@ -1419,6 +1419,7 @@ async def trips_scenario(b, p):
     _seed_trip(folder, "20261113T210639Z", 1794604000, -41.29, 174.78, speeding=True)
     _seed_trip(folder, "20261113T200000Z", 1763000000, -41.30, 174.77, speeding=False)  # (a year older, for the date filter)
     port, udp = PORT + 40, 24568
+    quit_mark = len(b.console)
     base = f"http://127.0.0.1:{port}"
     env = {**ENV, "XDG_DATA_HOME": str(data), "LOCALAPPDATA": str(data)}
     try:
@@ -1623,6 +1624,59 @@ async def trips_scenario(b, p):
         await b.eval("document.querySelector('.popups').open = true")
         check("the popup checkboxes are labelled as popup messages", "Popup messages" in await b.eval("document.querySelector('.pop-group legend').textContent") and await b.eval("document.querySelectorAll('.pop-group input[type=checkbox]').length") == 3)
 
+        print("\n== map size: drag, click, fill the window")
+        await b.resize(1280, 900)
+        await b.goto(base + "/trips#20261113T210639Z", wait=2.5)
+        await b.eval("localStorage.clear()")
+        await b.goto(base + "/trips#20261113T210639Z", wait=2.5)
+        h0 = (await b.rect("#mapbox"))["h"]
+        grip = await b.rect("#map-grip")
+        await b.drag(grip["cx"], grip["cy"], grip["cx"], grip["cy"] + 60)
+        await p.settle(0.5)
+        h1 = (await b.rect("#mapbox"))["h"]
+        check("dragging the grip under the map makes it taller", 50 < h1 - h0 < 70, f"{h0} -> {h1}")
+        check("and the map fills the new size", abs(await b.eval("document.querySelector('#map').clientHeight") - h1) <= 3 and await b.eval("document.querySelector('#map.leaflet-container') !== null"))
+        await b.eval("document.getElementById('map-bigger').click()")
+        await p.settle(0.4)
+        h2 = (await b.rect("#mapbox"))["h"]
+        check("clicking bigger adds a step", 110 < h2 - h1 < 130, f"{h1} -> {h2}")
+        await b.eval("document.getElementById('map-smaller').click(); document.getElementById('map-smaller').click()")
+        await p.settle(0.4)
+        h3 = (await b.rect("#mapbox"))["h"]
+        check("and smaller takes two away", 110 < h2 - h3 - 120 + 120 < 130 or abs((h2 - h3) - 240) < 12, f"{h2} -> {h3}")
+        await b.eval("document.getElementById('map-bigger').click()")
+        await p.settle(0.4)
+        remembered = await b.eval("localStorage.getItem('thrashdash.trips.maph')")
+        await b.goto(base + "/trips#20261113T210639Z", wait=2.5)
+        h4 = (await b.rect("#mapbox"))["h"]
+        check("the height is remembered by the browser", remembered is not None and abs(h4 - float(remembered) - 2) <= 4, f"{remembered} -> {h4}")
+        await b.eval("document.getElementById('map-grip').dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
+        await p.settle(0.4)
+        h5 = (await b.rect("#mapbox"))["h"]
+        check("double-clicking the grip puts it back to the usual size", abs(h5 - h0) <= 3 and await b.eval("localStorage.getItem('thrashdash.trips.maph')") is None, f"{h5} vs {h0}")
+
+        await b.eval("document.getElementById('map-fill').click()")
+        await p.settle(0.6)
+        fill = await b.eval("(() => [getComputedStyle(document.getElementById('side')).display, document.getElementById('mapbox').getBoundingClientRect().height, innerHeight, document.getElementById('map-fill').getAttribute('aria-pressed')])()")
+        check("Fill the window gives the map the room: the list steps aside and the map is nearly as tall as the window", fill[0] == "none" and fill[1] > fill[2] - 200 and fill[3] == "true", str(fill))
+        await b.key("Escape")
+        await p.settle(0.5)
+        back = await b.eval("(() => [getComputedStyle(document.getElementById('side')).display, document.getElementById('mapbox').getBoundingClientRect().height])()")
+        check("Esc puts everything back", back[0] != "none" and abs(back[1] - h0) <= 3, str(back))
+
+        await b.eval("document.getElementById('scrub').value = '800'; document.getElementById('scrub').dispatchEvent(new Event('input'))")
+        await p.settle(0.3)
+        await b.eval("document.getElementById('headup').click()")
+        await p.settle(0.8)
+        before = (await b.rect("#mapbox"))["h"]
+        await b.eval("document.getElementById('map-bigger').click()")
+        await p.settle(0.6)
+        turned = await b.eval("(() => { const m = document.getElementById('mapbox'), r = m.getBoundingClientRect(), d = parseFloat(m.style.getPropertyValue('--d')); return [m.classList.contains('rotating'), r.height, r.width, d]; })()")
+        check("resizing a map that is turned (heading up) keeps it covering its box", turned[0] and turned[1] - before > 100 and turned[3] >= (turned[1] ** 2 + turned[2] ** 2) ** 0.5 - 2, str((before, turned)))
+        await b.eval("document.getElementById('headup').click(); document.getElementById('map-grip').dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
+        await p.settle(0.5)
+        await b.eval("localStorage.clear()")
+
         print("\n== a shared trip (one html file, opened from disk)")
         shared = data / "shared-trip.html"
         shared.write_bytes(urllib.request.urlopen(base + "/api/triplog/20261113T210639Z/share", timeout=10).read())
@@ -1811,8 +1865,23 @@ async def trips_scenario(b, p):
         bad = [m for m in b.console[mark:] if m[0] == "error" and "favicon" not in m[1] and "Failed to load resource" not in m[1]]
         check("the Trips page raised no console errors (tile loads aside)", not bad, str(bad[:3]))
         check("and no uncaught exceptions", not b.errors, str(b.errors[:2]))
+
+        print("\n== the Quit button, and ThrashDash closing takes its windows with it")
+        quit_mark = len(b.console)
+        await b.resize(1200, 700)
+        await b.goto(base + "/", wait=2.0)
+        await b.eval("window.__closeCalls = 0; window.close = () => { window.__closeCalls++; }")  # (a headless tab may not close itself; what is checked is that the page is asked to)
+        await b.eval("document.getElementById('dash-button').click()")
+        await p.settle(0.8)
+        check("the Dashboards menu has a Quit button, which asks again first", await b.eval("(() => { const q = document.querySelector('.dm-quit'); if (!q) return false; q.click(); return q.textContent; })()") == "Really quit?")
+        check("ThrashDash is still running after one click", relay.poll() is None)
+        await b.eval("document.querySelector('.dm-quit').click()")
+        await p.settle(3.5)
+        check("the second click quits ThrashDash, promptly, and it takes the dashboard window with it", relay.poll() is not None and await b.eval("window.__closeCalls") == 1, f"running={relay.poll() is None}, close asked {await b.eval('window.__closeCalls')} times")
     finally:
         await b.goto("about:blank", wait=0.3)  # (so the page does not complain about its relay going away, which would count against the next scenario)
+        del b.console[quit_mark:]  # (a headless tab cannot close itself, so after the quit it kept trying to reach the relay that had gone: that is not a fault)
+        b.errors.clear()
         relay.kill()
         relay.wait(timeout=5)
         await b.resize(1400, 760)

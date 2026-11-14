@@ -9,7 +9,7 @@ import { h, s } from "../dom.js";
 import { buildPrefs, resolveUnit } from "../units.js";
 import { createWindowReporter, ensureWindowId } from "../windowState.js";
 import { formatDuration } from "../economy.js";
-import { RAMP, REPLAY_RATES, advanceLive, interpolateFeed, liveReadout, nextAutoOpen, WHEN_OPTIONS, advanceReplay, clockText, colourScaleTop, filterOptions, filterRoutes, overviewTiles, routesBounds, turnToward, distanceText, graphModel, replayReadout, routeRuns, sameTrip, sampleAtDistance, speedText, statTiles, tripTitle } from "./model.js";
+import { RAMP, REPLAY_RATES, advanceLive, interpolateFeed, liveReadout, nextAutoOpen, WHEN_OPTIONS, advanceReplay, clockText, colourScaleTop, filterOptions, filterRoutes, overviewTiles, routesBounds, turnToward, clampMapHeight, MAP_STEP_PX, distanceText, graphModel, replayReadout, routeRuns, sameTrip, sampleAtDistance, speedText, statTiles, tripTitle } from "./model.js";
 
 const LIVE_MS = 3000; // while a trip is being recorded (or open and not finished), the page re-reads it this often
 const IDLE_TICKS = 1; // with nothing being recorded it only looks every IDLE_TICKS * LIVE_MS, to notice a new trip (the list is cheap to read)
@@ -50,29 +50,6 @@ const stored = (key) => {
     return null; // (a page that may not keep anything, such as one shown in a sandbox)
   }
 };
-// What this page is doing, said to the relay a few lines at a time (GET /api/pagelog), so that when something does not work on a real
-// screen it can be read afterwards instead of guessed at. Only the Trips window itself says anything.
-const PAGE_VERSION = "2026-11-15 b"; // changes when this page's behaviour does: the log shows which version a window is really running
-const logQueue = [];
-let logTimer = 0;
-function pageLog(text) {
-  if (SHARED || EMBED) return;
-  logQueue.push(`${new Date().toISOString().slice(11, 23)} ${text}`);
-  if (!logTimer) logTimer = setTimeout(flushPageLog, 800);
-}
-async function flushPageLog() {
-  logTimer = 0;
-  const lines = logQueue.splice(0, 50);
-  if (!lines.length) return;
-  try {
-    await api.pageLog(lines);
-  } catch {
-    /* the relay is not there (or this is not the computer running it): nothing to say it to */
-  }
-  if (logQueue.length) logTimer = setTimeout(flushPageLog, 800);
-}
-window.addEventListener("error", (e) => pageLog(`ERROR ${e.message} (${(e.filename || "").split("/").pop()}:${e.lineno})`));
-window.addEventListener("unhandledrejection", (e) => pageLog(`REJECTED ${e.reason?.message ?? e.reason}`));
 const state = { trips: [], enabled: true, selected: null, detail: null, client: { local: false }, prefs: buildPrefs({}, location.search), recording: false };
 let map = null;
 let baseLayer = null;
@@ -166,11 +143,9 @@ async function select(id, { refit = true } = {}) {
   try {
     trip = await api.getTrip(id);
   } catch (e) {
-    pageLog(`could not open ${id}: ${e.message}`);
     if (state.selected === id) showNothing();
     return;
   }
-  pageLog(`showing ${id} (${trip.points.length} points, ${trip.end ? "ended" : "being recorded"})`);
   show(trip, refit);
 }
 
@@ -418,8 +393,6 @@ function connectFeed() {
   if (SHARED || feed.ws || typeof WebSocket === "undefined") return;
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?feed=geo`);
   feed.ws = ws;
-  ws.onopen = () => pageLog("feed open");
-  ws.onerror = () => pageLog("feed error");
   ws.onmessage = (event) => {
     let msg;
     try {
@@ -427,8 +400,11 @@ function connectFeed() {
     } catch {
       return;
     }
+    if (msg.type === "quit") {
+      if (!EMBED) window.close(); // ThrashDash is closing and was asked to take its windows with it (a map inside a dashboard goes with its dashboard)
+      return;
+    }
     if (msg.type === "trip") {
-      pageLog(`feed: trip ${msg.event} ${msg.id}`);
       tick(); // a trip started or ended: look at the list now (a page behind the game has its timers slowed, but a message still arrives at once)
       return;
     }
@@ -446,7 +422,6 @@ function connectFeed() {
     feed.last = now;
   };
   ws.onclose = () => {
-    pageLog("feed closed");
     feed.ws = null;
     feed.samples = [];
     feed.offsets = [];
@@ -830,6 +805,115 @@ function setupHeadUp() {
 
 
 
+
+// ---- the size of the maps ---------------------------------------------------------------------------------------------------------
+// Drag the grip under a map, click smaller or bigger, or fill the window with the map (Esc goes back). The height is remembered by this
+// browser, like the street / satellite choice. The Trips window's own size and place are saved with the window config instead.
+
+const MAPH_KEYS = { detail: "thrashdash.trips.maph", overview: "thrashdash.trips.ovmaph" };
+const MAPH_VARS = { detail: "--map-h", overview: "--ovmap-h" };
+const MAPH_BOXES = { detail: "mapbox", overview: "ovmap" };
+
+/** After a map's room changed: the maps take the room they now have, and the graph redraws for its width. */
+function relayout() {
+  if (rotation.on) sizeRotatingBox();
+  map?.invalidateSize({ animate: false });
+  overview.map?.invalidateSize({ animate: false });
+  if (state.detail) drawGraph();
+}
+
+const mapHeight = (which) => Math.round($(MAPH_BOXES[which]).getBoundingClientRect().height);
+
+function setMapHeight(which, px, remember = true) {
+  const height = clampMapHeight(px, window.innerHeight);
+  document.documentElement.style.setProperty(MAPH_VARS[which], `${height}px`);
+  if (remember) {
+    try {
+      localStorage.setItem(MAPH_KEYS[which], String(height));
+    } catch {
+      /* a browser that will not remember is fine */
+    }
+  }
+  relayout();
+}
+
+function resetMapHeight(which) {
+  document.documentElement.style.removeProperty(MAPH_VARS[which]);
+  try {
+    localStorage.removeItem(MAPH_KEYS[which]);
+  } catch {
+    /* fine */
+  }
+  relayout();
+}
+
+function setFill(on) {
+  document.body.classList.toggle("map-fill", on);
+  for (const id of ["map-fill", "ov-fill"]) $(id).setAttribute("aria-pressed", String(on));
+  requestAnimationFrame(relayout); // (after the page has been laid out again)
+}
+
+function setupMapSize() {
+  if (EMBED) return;
+  for (const which of Object.keys(MAPH_KEYS)) {
+    const saved = Number(stored(MAPH_KEYS[which]));
+    if (saved) document.documentElement.style.setProperty(MAPH_VARS[which], `${clampMapHeight(saved, window.innerHeight)}px`);
+  }
+  const grips = { detail: $("map-grip"), overview: $("ov-grip") };
+  const buttons = { detail: ["map-smaller", "map-bigger", "map-fill"], overview: ["ov-smaller", "ov-bigger", "ov-fill"] };
+  for (const which of Object.keys(grips)) {
+    const [smaller, bigger, fill] = buttons[which];
+    $(smaller).addEventListener("click", () => setMapHeight(which, mapHeight(which) - MAP_STEP_PX));
+    $(bigger).addEventListener("click", () => setMapHeight(which, mapHeight(which) + MAP_STEP_PX));
+    $(fill).addEventListener("click", () => setFill(!document.body.classList.contains("map-fill")));
+    const grip = grips[which];
+    let frame = 0;
+    grip.addEventListener("pointerdown", (e) => {
+      grip.setPointerCapture(e.pointerId);
+      grip.classList.add("dragging");
+      const from = e.clientY;
+      const base = mapHeight(which);
+      const move = (ev) => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => setMapHeight(which, base + ev.clientY - from, false));
+      };
+      const up = (ev) => {
+        grip.classList.remove("dragging");
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        grip.removeEventListener("pointercancel", up);
+        setMapHeight(which, base + ev.clientY - from); // (and remembered, now it has stopped)
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+      grip.addEventListener("pointercancel", up);
+      e.preventDefault();
+    });
+    grip.addEventListener("dblclick", () => resetMapHeight(which));
+    grip.addEventListener("keydown", (e) => {
+      const step = { ArrowUp: -24, ArrowDown: 24 }[e.key];
+      if (step) {
+        e.preventDefault();
+        setMapHeight(which, mapHeight(which) + step);
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        resetMapHeight(which);
+      }
+    });
+  }
+  document.addEventListener("keydown", (e) => {
+    const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT");
+    if (e.key === "Escape" && document.body.classList.contains("map-fill") && !typing) setFill(false);
+  });
+  window.addEventListener("resize", () => {
+    // (a window made smaller must not be left with a map taller than it)
+    for (const which of Object.keys(MAPH_KEYS)) {
+      const current = document.documentElement.style.getPropertyValue(MAPH_VARS[which]);
+      if (current) setMapHeight(which, parseFloat(current), false);
+    }
+  });
+}
+
 // ---- renaming and deleting ---------------------------------------------------------------------------------------------
 
 function startRename() {
@@ -900,17 +984,14 @@ let refreshing = false;
 async function maybeAutoOpen(allowSwitch) {
   const id = nextAutoOpen(state.trips, autoOpened);
   if (!id) return;
-  pageLog(`new trip ${id}: auto-open ${$("auto-open").checked ? "on" : "OFF"}, switching ${allowSwitch ? "allowed" : "not allowed (all-trips map)"}, showing ${state.selected}`);
   if (allowSwitch && $("auto-open").checked && document.activeElement?.classList.contains("rename-input")) return; // (try again once the name is done)
   autoOpened = id;
   if (allowSwitch && $("auto-open").checked && state.selected !== id) await select(id, { refit: true });
 }
 
 /** Called every LIVE_MS. Does the work only when something is being recorded (or the open trip is unfinished). */
-let ticks = 0;
 async function tick() {
   if (SHARED) return; // (a shared page has one finished trip and nothing to refresh)
-  if (++ticks % 20 === 0) pageLog(`alive: ${document.visibilityState}, ${state.trips.length} trips, ${state.trips.filter((t) => t.recording).length} recording, showing ${state.selected}, ${refreshing ? "busy" : "idle"}, feed ${feed.ws ? feed.ws.readyState : "none"}`);
   if (refreshing) return;
   // Looking for a new trip is cheap, so it goes on even when the window is hidden behind the game; redrawing a trip nobody can see is not.
   const visible = document.visibilityState === "visible";
@@ -1032,6 +1113,7 @@ async function start() {
   });
   setupReplay();
   setupHeadUp();
+  setupMapSize();
   setupOverview();
   setupPopups(settingsLoaded);
   reportAsWindow();
@@ -1074,7 +1156,6 @@ async function start() {
     const live = state.trips.find((t) => t.recording);
     if (live) await select(live.id); // (otherwise it waits: the next trip to start opens by itself)
   } else if (state.trips.length && (SHARED || matchMedia("(min-width: 900px)").matches)) await select(state.trips[0].id);
-  pageLog(`started: page ${PAGE_VERSION}, ${document.visibilityState}, auto-open ${$("auto-open").checked ? "on" : "OFF"}, address ${location.pathname}${location.hash}, ${state.trips.length} trips, ${state.trips.filter((t) => t.recording).length} recording`);
   refreshTimer = setInterval(tick, LIVE_MS);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {

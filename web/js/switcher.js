@@ -346,6 +346,30 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
         hide();
         openWindow(currentId());
       });
+      const quit = h("button", "dm-action dm-quit", foot, "Quit ThrashDash");
+      quit.type = "button";
+      quit.title = "Stop ThrashDash. Its windows close with it (they come back next time it starts)";
+      let sure = false;
+      quit.addEventListener("click", async () => {
+        if (!sure) {
+          sure = true; // asks once more, like Delete does
+          quit.textContent = "Really quit?";
+          setTimeout(() => {
+            sure = false;
+            quit.textContent = "Quit ThrashDash";
+          }, 4000);
+          return;
+        }
+        quit.disabled = true;
+        quit.textContent = "Quitting\u2026";
+        try {
+          await api.quit();
+        } catch (e) {
+          quit.disabled = false;
+          quit.textContent = "Quit ThrashDash";
+          console.warn("ThrashDash: could not quit", e);
+        }
+      });
     }
   }
 

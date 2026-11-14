@@ -158,3 +158,32 @@ def open_in_default_browser(url):
         return True
     except OSError:
         return False
+
+
+def stop_profile_browser(profile_name="main", say=print):
+    """Ask the browser that is running ThrashDash's own window profile to quit (Linux only; elsewhere the windows are left to close
+    themselves). A fallback for when a window did not close when told to. It only ever touches processes started with ThrashDash's
+    own `--user-data-dir`, never your everyday browser. Returns how many were asked."""
+    if not sys.platform.startswith("linux"):
+        return 0
+    wanted = f"--user-data-dir={profile_dir(profile_name)}"
+    asked = 0
+    try:
+        pids = [int(p) for p in os.listdir("/proc") if p.isdigit()]
+    except OSError:
+        return 0
+    for pid in pids:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                args = f.read().split(b"\0")
+        except OSError:
+            continue
+        if wanted.encode() in args and not any(a.startswith(b"--type=") for a in args):  # (the browser's main process, not its helpers)
+            try:
+                os.kill(pid, 15)  # SIGTERM: the browser closes its windows and exits tidily
+                asked += 1
+            except OSError:
+                pass
+    if asked:
+        say(f"  closed ThrashDash's browser ({asked} process{'es' if asked != 1 else ''})")
+    return asked

@@ -12,10 +12,10 @@ from .lifecycle import QUIT_GRACE_S, STARTUP_TIMEOUT_S, QuitWatcher, quit_when_w
 from .auth import AuthStore, valid_pin
 from .modinstall import install_mod
 from .output import ensure_output
-from .launcher import find_browser, open_in_default_browser, open_window, profile_in_use
+from .launcher import find_browser, open_in_default_browser, open_window, profile_in_use, stop_profile_browser
 from .netinfo import is_local_client, lan_addresses
 from .paths import migrate_legacy_data, user_data_dir, web_root
-from .api import WINDOW_OPENER
+from .api import QUIT, WINDOW_OPENER
 from .server import WINDOW_COUNTER, make_app
 from .store import LayoutStore, SettingsStore
 from .triplog import TripLog
@@ -141,6 +141,7 @@ async def amain(args):
             # In the background: it may wait a moment for windows left open by the previous run to reconnect.
             background.append(asyncio.create_task(report_windows(windows, settings, launch, url.rstrip("/"), browser, configs)))
     stop = asyncio.Event()
+    app[QUIT]["stop"] = stop.set  # (the Quit button in the Dashboards menu)
     if args.quit_when_windows_close:
         # With --no-window the user is opening the page themselves, so there is no "the window never opened" to quit for.
         watcher = QuitWatcher(app[WINDOW_COUNTER], grace=args.debug_quit_grace, startup_timeout=float("inf") if args.no_window else args.debug_quit_startup)
@@ -157,6 +158,10 @@ async def amain(args):
         if transport:
             transport.close()
         await runner.cleanup()
+        if not args.no_window and settings.get().get("closeWindowsOnExit") is not False:
+            await asyncio.sleep(1.0)  # (the windows were told to close; give them a moment)
+            if profile_in_use():
+                stop_profile_browser()  # one did not: the browser that runs ThrashDash's own windows is asked to quit
     return 0
 
 

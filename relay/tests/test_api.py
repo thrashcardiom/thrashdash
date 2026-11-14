@@ -166,7 +166,7 @@ class SettingsStoreTests(unittest.TestCase):
             path = Path(d) / "settings.json"
             store = SettingsStore(path)
             self.assertEqual(store.get(), {"units": {"speed": "kmh", "temp": "c", "distance": "km", "pressure": "psi", "economy": "auto"}, "defaultLayout": "default", "skins": {}, "vehicleDashboards": {}, "autoSwitch": True, "lan": False, "alerts": {"enabled": True, "off": []},
-                                         "tripNotices": {"game": True, "gameStart": False, "window": True}, "tripIdleEndMin": 2, "restoreWindows": True, "exactWindowPlacement": False})
+                                         "tripNotices": {"game": True, "gameStart": False, "window": True}, "tripIdleEndMin": 2, "restoreWindows": True, "exactWindowPlacement": False, "closeWindowsOnExit": True})
             store.update({"units": {"speed": "mph"}})
             self.assertEqual(SettingsStore(path).get()["units"], {"speed": "mph", "temp": "c", "distance": "km", "pressure": "psi", "economy": "auto"})  # partial update keeps the rest
             path.write_text("garbage{")

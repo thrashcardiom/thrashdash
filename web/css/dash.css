@@ -175,6 +175,7 @@ body.editing #top-controls { display: none; }
 .dm-config-name { display: flex; gap: 6px; padding: 2px 6px 4px; }
 .dm-config-input { flex: 1 1 auto; min-width: 0; padding: 6px 8px; font: 600 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--accent); border-radius: 6px; outline: none; }
 .dm-changed { color: var(--warn); }
+.dm-quit:hover { color: var(--crit); }
 .dm-note { padding: 2px 8px 4px; color: var(--muted); font-size: 11px; line-height: 1.35; }
 .dm-error { margin: 2px 8px 4px; padding: 6px 8px; border-radius: 6px; background: rgba(255, 77, 77, 0.12); color: #ff8a8a; font-size: 12px; line-height: 1.35; }
 .dm-foot { display: flex; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--track); }

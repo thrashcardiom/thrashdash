@@ -415,3 +415,15 @@ export function liveReadout(trip, live, prefs) {
   parts.push(`${dist.value} ${dist.label}`);
   return { text: parts.join(" \u00B7 "), over: isOver(trip, last.t), here: { t: last.t, d: last.d, la: live.lat, lo: live.lon, h: Number.isFinite(live.hdg) ? live.hdg : last.h, s: live.spd ?? last.s } };
 }
+
+// ---- the size of the maps ---------------------------------------------------------------------------------------------------------
+
+export const MAP_MIN_PX = 200;
+export const MAP_STEP_PX = 120; // what one click of "bigger" or "smaller" changes the height by
+const MAP_ROOM_PX = 140; // room left for the rest of the page when the map is as tall as it may be
+
+/** A map height kept sensible: no shorter than MAP_MIN_PX, no taller than the window less room for the replay bar and the title. */
+export function clampMapHeight(px, windowHeight) {
+  const most = Math.max(MAP_MIN_PX, (Number.isFinite(windowHeight) ? windowHeight : 800) - MAP_ROOM_PX);
+  return Math.round(Math.min(most, Math.max(MAP_MIN_PX, Number.isFinite(px) ? px : MAP_MIN_PX)));
+}

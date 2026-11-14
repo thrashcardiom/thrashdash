@@ -60,7 +60,13 @@
             <button data-base="street" type="button" aria-pressed="true">Street</button>
             <button data-base="sat" type="button" aria-pressed="false">Satellite</button>
           </div>
+          <div class="sizer" role="group" aria-label="Map size">
+            <button id="ov-smaller" type="button" aria-label="Smaller map" title="Smaller map">&minus;</button>
+            <button id="ov-bigger" type="button" aria-label="Bigger map" title="Bigger map">+</button>
+            <button id="ov-fill" type="button" aria-pressed="false" aria-label="Fill the window with the map" title="Fill the window with the map (Esc to go back)">&#x2922;</button>
+          </div>
         </div>
+        <div id="ov-grip" class="grip" role="separator" aria-orientation="horizontal" aria-label="Resize the map" tabindex="0" title="Drag to resize the map (double-click to reset)"></div>
         <section id="ov-tiles" class="tiles" aria-label="Totals"></section>
         <p class="key muted">Click a route to open that trip. The more often a road was driven, the brighter it is.</p>
       </article>
@@ -93,7 +99,13 @@
             <button id="base-sat" data-base="sat" type="button" aria-pressed="false">Satellite</button>
           </div>
           <div id="legend" class="legend" aria-hidden="true"></div>
+          <div class="sizer" role="group" aria-label="Map size">
+            <button id="map-smaller" type="button" aria-label="Smaller map" title="Smaller map">&minus;</button>
+            <button id="map-bigger" type="button" aria-label="Bigger map" title="Bigger map">+</button>
+            <button id="map-fill" type="button" aria-pressed="false" aria-label="Fill the window with the map" title="Fill the window with the map (Esc to go back)">&#x2922;</button>
+          </div>
         </div>
+        <div id="map-grip" class="grip" role="separator" aria-orientation="horizontal" aria-label="Resize the map" tabindex="0" title="Drag to resize the map (double-click to reset)"></div>
         <div id="replay" class="replay" role="group" aria-label="Replay this trip">
           <button id="play" class="btn play" type="button">Play</button>
           <button id="golive" class="btn live-btn" type="button" title="Back to the car's position now" hidden>Go live</button>

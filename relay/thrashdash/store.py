@@ -148,7 +148,9 @@ class SettingsStore:
                 # how long the car may be parked before a trip ends, in minutes
                 "tripIdleEndMin": 2,
                 # reopen the dashboard windows that were open last time; and place them exactly (X11 mode on Wayland)
-                "restoreWindows": True, "exactWindowPlacement": False}
+                "restoreWindows": True, "exactWindowPlacement": False,
+                # close the dashboard and map windows ThrashDash opened when it closes (they are remembered, so they come back next time)
+                "closeWindowsOnExit": True}
 
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -157,7 +159,7 @@ class SettingsStore:
     def _fresh(cls):
         d = cls.DEFAULTS
         return {"units": dict(d["units"]), "defaultLayout": d["defaultLayout"], "skins": {}, "vehicleDashboards": {}, "autoSwitch": d["autoSwitch"], "lan": d["lan"], "alerts": {"enabled": True, "off": []}, "tripNotices": dict(d["tripNotices"]), "tripIdleEndMin": d["tripIdleEndMin"],
-                "restoreWindows": d["restoreWindows"], "exactWindowPlacement": d["exactWindowPlacement"]}
+                "restoreWindows": d["restoreWindows"], "exactWindowPlacement": d["exactWindowPlacement"], "closeWindowsOnExit": d["closeWindowsOnExit"]}
 
     def get(self):
         merged = self._fresh()
@@ -179,7 +181,7 @@ class SettingsStore:
         merged["tripNotices"].update(stored.get("tripNotices", {}))
         if "tripIdleEndMin" in stored:
             merged["tripIdleEndMin"] = stored["tripIdleEndMin"]
-        for flag in ("restoreWindows", "exactWindowPlacement"):
+        for flag in ("restoreWindows", "exactWindowPlacement", "closeWindowsOnExit"):
             if flag in stored:
                 merged[flag] = stored[flag]
         return merged
@@ -210,7 +212,7 @@ class SettingsStore:
         current["tripNotices"].update(patch.get("tripNotices", {}))
         if "tripIdleEndMin" in patch:
             current["tripIdleEndMin"] = patch["tripIdleEndMin"]
-        for flag in ("restoreWindows", "exactWindowPlacement"):
+        for flag in ("restoreWindows", "exactWindowPlacement", "closeWindowsOnExit"):
             if flag in patch:
                 current[flag] = patch[flag]
         if len(current["skins"]) > MAX_SKIN_ENTRIES:

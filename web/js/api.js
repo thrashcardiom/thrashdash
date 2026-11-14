@@ -44,8 +44,8 @@ export const api = {
   saveConfig: (id) => call("PUT", `/api/configs/${encodeURIComponent(id)}`, {}),
   activateConfig: (id) => call("PUT", "/api/configs/active", { id }),
   deleteConfig: (id) => call("DELETE", `/api/configs/${encodeURIComponent(id)}`),
-  /** The Trips page's own log lines, kept by the relay (GET /api/pagelog) so a problem seen on a real screen can be read afterwards. */
-  pageLog: (lines) => call("POST", "/api/pagelog", { lines }),
+  /** Quit ThrashDash (this computer only): the relay stops, and its windows close with it unless that is switched off. */
+  quit: () => call("POST", "/api/quit", {}),
   /** A popup now, to the game and the dashboard windows: {ok, game}. */
   testPopup: () => call("POST", "/api/triplog/test-popup", {}),
   listRoutes: () => call("GET", "/api/triplog/routes"),

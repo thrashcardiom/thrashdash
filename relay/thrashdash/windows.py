@@ -82,6 +82,7 @@ class WindowRegistry:
         self._removed = {}  # window id -> client timestamp (ms) of its close
         self._live = set()  # windows heard from since this relay started
         self._dirty = False
+        self._frozen = False
         self._saved_at = -SAVE_AT_MOST_EVERY_S
         self._load()
 
@@ -126,6 +127,12 @@ class WindowRegistry:
         if self._clock() - self._saved_at >= SAVE_AT_MOST_EVERY_S:
             self.save()
 
+    def freeze(self):
+        """ThrashDash is closing: what is remembered stays as it is. The windows it then closes would each say they closed, which would
+        make it forget them, and they are meant to come back next time."""
+        self._frozen = True
+        self.flush()
+
     def flush(self):
         """Write anything not yet written (at shutdown)."""
         if self._dirty:
@@ -139,6 +146,8 @@ class WindowRegistry:
             raise ValidationError("window id: 6 to 24 lowercase letters and digits")
         stamp = _int(stamp, "stamp", 0, 4_000_000_000_000)
         entry = clean_window(raw)
+        if self._frozen:
+            return False
         if stamp < self._removed.get(wid, -1):
             return False  # a late report from before the window was closed
         if wid not in self.entries and len(self.entries) >= MAX_WINDOWS:
@@ -157,7 +166,7 @@ class WindowRegistry:
         if not isinstance(wid, str) or not WINDOW_ID_RE.match(wid):
             raise ValidationError("window id: 6 to 24 lowercase letters and digits")
         stamp = _int(stamp, "stamp", 0, 4_000_000_000_000)
-        if stamp < self._stamps.get(wid, 0):
+        if self._frozen or stamp < self._stamps.get(wid, 0):
             return False
         self._removed[wid] = max(stamp, self._removed.get(wid, 0))
         self._live.discard(wid)

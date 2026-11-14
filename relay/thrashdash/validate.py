@@ -193,7 +193,7 @@ def validate_settings(raw):
         if not isinstance(raw["lan"], bool):
             raise ValidationError("lan: must be true or false")
         clean["lan"] = raw["lan"]
-    for flag in ("restoreWindows", "exactWindowPlacement"):
+    for flag in ("restoreWindows", "exactWindowPlacement", "closeWindowsOnExit"):
         if flag in raw:
             if not isinstance(raw[flag], bool):
                 raise ValidationError(f"{flag}: must be true or false")

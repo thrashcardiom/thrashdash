@@ -473,6 +473,16 @@ function openTripsWindow() {
   window.open(tripsUrl(randomWindowId()), "_blank", "popup=yes,width=1180,height=760");
 }
 
+/** ThrashDash is closing: close this window too. (A browser only lets a page close a window it may close, such as the borderless app
+ *  windows ThrashDash opened; a dashboard in an ordinary tab stays, showing that the relay has gone.) */
+function closeThisWindow() {
+  try {
+    window.close();
+  } catch {
+    /* not allowed here: the window stays and shows that ThrashDash is no longer running */
+  }
+}
+
 const tripNotice = createTripNotice(document.getElementById("trip-notice"));
 let retryMs = 500;
 function connect() {
@@ -494,6 +504,8 @@ function connect() {
       applyStatus();
     } else if (msg.type === "catalog") {
       app.catalog = { vehicle: msg.vehicle, channels: msg.channels || {} };
+    } else if (msg.type === "quit") {
+      closeThisWindow(); // ThrashDash is closing and was asked to take its windows with it
     } else if (msg.type === "notice") {
       tripNotice.show(msg); // a trip has ended (the relay only sends this when the setting is on)
     }

@@ -1,6 +1,5 @@
 """HTTP + WebSocket server: serves the dashboard and streams telemetry to it."""
 import asyncio
-from collections import deque
 import json
 from urllib.parse import quote, urlencode, urlparse
 
@@ -10,7 +9,7 @@ from . import __version__
 from .auth import COOKIE_NAME, AuthStore
 from .lifecycle import WindowCounter
 from .windows import WindowRegistry
-from .api import AUTH, CONFIGS, HUB, LAN_CONTROLLER, LAYOUTS, LOCAL_CHECK, NOTICES, PAGELOG, SETTINGS, TRIPLOG, WINDOW_OPENER, WINDOWS, add_routes, check_write_allowed, set_session_cookie
+from .api import AUTH, CONFIGS, HUB, LAN_CONTROLLER, LAYOUTS, LOCAL_CHECK, NOTICES, QUIT, SETTINGS, TRIPLOG, WINDOW_OPENER, WINDOWS, add_routes, check_write_allowed, set_session_cookie
 from .lan import LanController
 from .netinfo import host_allowed, is_local_client
 from .paths import web_root
@@ -39,6 +38,7 @@ TRIPS_REFERRER_POLICY = "origin"
 PORT = web.AppKey("port", int)
 WINDOW_COUNTER = web.AppKey("window_counter", WindowCounter)  # open dashboard windows on this computer (their WebSockets)
 REMOTE_SOCKETS = web.AppKey("remote_sockets", set)
+LOCAL_SOCKETS = web.AppKey("local_sockets", set)  # open windows on this computer (dashboards and the Trips page), told to close when ThrashDash does
 
 
 # What a device on the network may fetch BEFORE it has signed in: only the PIN page and what it needs.
@@ -153,7 +153,9 @@ async def ws_handler(request):
     geo_only = request.query.get("feed") == "geo"
     if remote:
         request.app[REMOTE_SOCKETS].add(ws)  # so switching network access off can drop them straight away
-    elif not geo_only:
+    else:
+        request.app[LOCAL_SOCKETS].add(ws)
+    if not remote and not geo_only:
         request.app[WINDOW_COUNTER].connected()  # an open dashboard window on this computer (see lifecycle.py)
 
     notices = request.app[NOTICES]
@@ -199,6 +201,7 @@ async def ws_handler(request):
             pass
     finally:
         request.app[REMOTE_SOCKETS].discard(ws)
+        request.app[LOCAL_SOCKETS].discard(ws)
         if not remote and not geo_only:
             request.app[WINDOW_COUNTER].disconnected()
         task.cancel()
@@ -219,7 +222,7 @@ def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_c
     lan = lan or LanController(http_port)
     app[HUB] = hub
     app[TRIPLOG] = triplog if triplog is not None else getattr(hub, "triplog", None)
-    app[PAGELOG] = deque(maxlen=400)  # what the Trips page says it is doing (api.post_pagelog)
+    app[QUIT] = {}  # filled in by __main__ once ThrashDash can be asked to stop
     app[CONFIGS] = configs  # saved sets of windows (configs.ConfigStore), or None
     app[WINDOW_OPENER] = {}  # filled in by __main__ once it can launch windows
     app[NOTICES] = notices  # trip popups for the dashboard windows (tripnotice.TripNotices), or None
@@ -227,6 +230,7 @@ def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_c
     app[LAN_CONTROLLER] = lan
     app[LOCAL_CHECK] = local_check
     app[REMOTE_SOCKETS] = set()
+    app[LOCAL_SOCKETS] = set()
     app[WINDOW_COUNTER] = WindowCounter()
     app[LAYOUTS] = layouts
     app[SETTINGS] = settings
@@ -238,6 +242,29 @@ def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_c
             await ws.close(code=1001, message=b"network access switched off")
 
     lan.on_disable = close_remote
+
+    async def close_windows(_app):
+        """ThrashDash is closing: what is remembered is kept as it is, and (unless switched off) the windows on this computer are told to
+        close. Phones and other devices are not: a phone's browser would not close, and has nothing to do with ThrashDash's windows.
+        Every connection is then closed, so shutting down does not wait (up to a minute) for browsers that keep theirs open."""
+        app[WINDOWS].freeze()
+        if settings.get().get("closeWindowsOnExit") is not False:
+            told = 0
+            for ws in list(app[LOCAL_SOCKETS]):
+                try:
+                    await ws.send_json({"type": "quit"})
+                    told += 1
+                except (ConnectionError, RuntimeError):
+                    pass
+            if told:
+                await asyncio.sleep(0.4)  # (time for the messages to arrive before the connections are closed)
+        for ws in [*app[LOCAL_SOCKETS], *app[REMOTE_SOCKETS]]:
+            try:
+                await ws.close(code=1001, message=b"ThrashDash is closing")
+            except (ConnectionError, RuntimeError, AttributeError):
+                pass
+
+    app.on_shutdown.append(close_windows)
 
     async def save_state(_app):
         hub.trips.save()  # keep the trip meters and the list of open windows when ThrashDash is closed

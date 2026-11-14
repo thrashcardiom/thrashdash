@@ -18,10 +18,10 @@ SETTINGS = web.AppKey("settings", SettingsStore)
 LAN_CONTROLLER = web.AppKey("lan_controller", LanController)
 LOCAL_CHECK = web.AppKey("local_check", object)  # remote address -> is this client this computer?
 CONFIGS = web.AppKey("configs", object)  # the ConfigStore (saved sets of windows), or None
+QUIT = web.AppKey("quit", dict)  # {"stop": fn} once ThrashDash can be asked to stop (set by __main__), else empty
 WINDOW_OPENER = web.AppKey("window_opener", dict)  # {"open": async fn(windows) -> int} once windows can be launched, else empty
 WINDOWS = web.AppKey("windows", object)  # the WindowRegistry (which dashboard windows are open)
 AUTH = web.AppKey("auth", object)  # the AuthStore: the PIN for devices on the network
-PAGELOG = web.AppKey("pagelog", object)  # the Trips page's own log lines (a bounded list), kept so a problem on a real screen can be read afterwards
 NOTICES = web.AppKey("notices", object)  # trip popups (tripnotice.TripNotices), or None
 TRIPLOG = web.AppKey("triplog", object)  # the TripLog (where the car has been), or None when this run keeps none
 HUB = web.AppKey("hub", object)  # the Hub (live data and the trip meters); defined here so both modules share one key
@@ -260,6 +260,15 @@ async def list_triplog(request):
     return web.json_response({"enabled": True, "status": log.status(), "trips": log.list(), "notices": dict(notices.stats) if notices is not None else {}})
 
 
+async def quit_thrashdash(request):
+    """Quit ThrashDash (the Quit button). The answer goes out first; then it stops the same way Ctrl-C does, which closes its windows."""
+    stop = request.app[QUIT].get("stop")
+    if stop is None:
+        return _error(501, "this run of ThrashDash cannot be stopped from the page")
+    asyncio.get_running_loop().call_later(0.25, stop)
+    return web.json_response({"ok": True})
+
+
 async def test_popup(request):
     """Send a popup now (to the game and the dashboard windows), whatever the settings say, to see which ways work."""
     notices = request.app[NOTICES]
@@ -334,27 +343,6 @@ async def delete_config(request):
     except NotFound:
         return _error(404, "there is no such config")
     return web.json_response({"ok": True, **_configs_state(request)})
-
-
-MAX_PAGELOG_LINES = 400
-MAX_PAGELOG_LINE = 300
-
-
-async def post_pagelog(request):
-    """The Trips page reports what it is doing (a new trip seen, what it decided, an error), a few lines at a time."""
-    body = await _body(request)
-    lines = body.get("lines") if isinstance(body, dict) else None
-    if not isinstance(lines, list) or len(lines) > 50:
-        return _error(400, "lines: a list of at most 50 lines of text")
-    log = request.app[PAGELOG]
-    for line in lines:
-        if isinstance(line, str):
-            log.append(line[:MAX_PAGELOG_LINE])
-    return web.json_response({"ok": True})
-
-
-async def get_pagelog(request):
-    return web.json_response({"lines": list(request.app[PAGELOG])})
 
 
 async def get_triplog_routes(request):
@@ -455,12 +443,11 @@ def add_routes(app):
     r.add_delete("/api/layouts/{id}", delete_layout)
     r.add_post("/api/trips/{name}/reset", reset_trip)
     r.add_get("/api/triplog", list_triplog)
-    r.add_get("/api/pagelog", get_pagelog)
-    r.add_post("/api/pagelog", post_pagelog)
     r.add_get("/api/configs", list_configs)
     r.add_post("/api/configs", create_config)
     r.add_put("/api/configs/{id}", save_config)
     r.add_delete("/api/configs/{id}", delete_config)
+    r.add_post("/api/quit", quit_thrashdash)
     r.add_post("/api/triplog/test-popup", test_popup)
     r.add_get("/api/triplog/routes", get_triplog_routes)  # (before {id}: first match wins)
     r.add_get("/api/triplog/{id}", get_triplog_trip)

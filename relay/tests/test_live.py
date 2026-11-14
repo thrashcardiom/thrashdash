@@ -155,29 +155,6 @@ class FeedTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("geo", {m.get("type") for m in seen})
 
 
-class PageLogTests(FeedTests):
-    async def test_the_trips_page_can_leave_notes_that_are_kept_and_bounded(self):
-        base = f"http://127.0.0.1:{self.port}/api/pagelog"
-        h = {"X-ThrashDash": "1"}
-        async with self.http.post(base, json={"lines": ["09:00:00.000 started", 5, "x" * 1000]}, headers=h) as r:
-            self.assertEqual(r.status, 200)
-        async with self.http.get(base) as r:
-            lines = (await r.json())["lines"]
-        self.assertEqual(lines[0], "09:00:00.000 started")
-        self.assertEqual(len(lines), 2)  # (the number was not text and was left out; the long line was cut)
-        self.assertEqual(len(lines[1]), 300)
-        for bad in ({"lines": "text"}, {"lines": ["x"] * 51}, ["x"]):
-            async with self.http.post(base, json=bad, headers=h) as r:
-                self.assertEqual(r.status, 400)
-        for i in range(10):
-            async with self.http.post(base, json={"lines": [f"n{i}-{j}" for j in range(50)]}, headers=h) as r:
-                self.assertEqual(r.status, 200)
-        async with self.http.get(base) as r:
-            self.assertEqual(len((await r.json())["lines"]), 400)  # (only the latest are kept)
-        async with self.http.post(base, json={"lines": ["x"]}) as r:
-            self.assertEqual(r.status, 403)  # (like every write: only this computer, with the header)
-
-
 class UdpToFeedTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_position_sent_by_the_game_reaches_the_page_and_the_game_is_known(self):
         from thrashdash.tripnotice import TripNotices

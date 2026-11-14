@@ -65,9 +65,9 @@ a.btn { display: inline-block; text-decoration: none; color: inherit; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .filters label { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
 .filters select { padding: 6px 8px; background: var(--panel); border: 1px solid var(--track); border-radius: 8px; color: var(--text); }
-#ovmap { height: min(62vh, 640px); min-height: 300px; background: #1b222d; }
+#ovmap { height: var(--ovmap-h, min(62vh, 640px)); min-height: 200px; background: #1b222d; }
 .mapbox { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--track); }
-#map { height: min(52vh, 520px); min-height: 280px; background: #1b222d; }
+#map { height: var(--map-h, min(52vh, 520px)); min-height: 200px; background: #1b222d; }
 .base { position: absolute; top: 10px; left: 56px; z-index: 1000; display: flex; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5); }
 .base button { padding: 6px 12px; background: rgba(20, 25, 34, 0.9); border: 0; cursor: pointer; font-size: 14px; }
 .base button[aria-pressed="true"] { background: var(--accent); color: #04121c; font-weight: 600; }
@@ -158,3 +158,24 @@ svg .rule { stroke: #fff; stroke-width: 1; opacity: 0.7; }
 .embed .mapbox { border: 0; border-radius: 0; height: 100vh; }
 .embed #map { height: 100vh; min-height: 0; }
 .embed #placeholder:not([hidden]) { display: flex !important; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; padding: 0 16px; }
+
+/* ---- map size: drag the grip under the map, click smaller / bigger, or fill the window ---- */
+.grip { height: 10px; margin: -6px 0 -6px; cursor: row-resize; touch-action: none; position: relative; z-index: 5; }
+.grip::after { content: ""; position: absolute; left: 50%; top: 3px; width: 56px; height: 4px; margin-left: -28px; border-radius: 2px; background: var(--track); }
+.grip:hover::after, .grip:focus-visible::after, .grip.dragging::after { background: var(--accent); }
+.grip:focus-visible { outline: none; }
+.sizer { position: absolute; top: 10px; right: 10px; z-index: 1000; display: flex; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5); }
+.sizer button { width: 34px; height: 32px; border: 0; background: rgba(20, 25, 34, 0.9); color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; }
+.sizer button:hover { background: var(--track); }
+.sizer button[aria-pressed="true"] { background: var(--accent); color: #04121c; }
+.sizer button:disabled { opacity: 0.4; cursor: default; }
+
+/* fill the window: the list, the figures and the graph step aside and the map takes the room (Esc or the same button goes back) */
+.map-fill #app { grid-template-columns: minmax(0, 1fr); }
+.map-fill #side, .map-fill .head, .map-fill #tiles, .map-fill .graphbox, .map-fill .share-foot, .map-fill .grip, .map-fill #ov-tiles, .map-fill #overview .key { display: none !important; }
+.map-fill #detail, .map-fill #overview { padding-top: 8px; padding-bottom: 8px; max-width: none; }
+.map-fill #map { height: calc(100vh - 140px) !important; }
+.map-fill #ovmap { height: calc(100vh - 100px) !important; }
+
+.embed .sizer, .embed .grip { display: none !important; }
+@media (max-width: 899px) { .grip { display: none; } }
