@@ -225,3 +225,12 @@ test("every built-in layout is accepted without a single warning", async () => {
     assert.equal(layout.widgets.length, raw.widgets.length, f);
   }
 });
+
+test("the live map widget is a known type with sensible defaults and limits", () => {
+  assert.ok(specs.tripmap, "registered");
+  const { layout, warnings } = sanitizeLayout(base([{ type: "tripmap", x: 0, y: 0, w: 400, h: 300 }, { type: "tripmap", x: 0, y: 0, w: 400, h: 300, zoom: 99, headUp: "yes" }]), specs);
+  assert.equal(layout.widgets.length, 2);
+  assert.equal(layout.widgets[0].headUp ?? specs.tripmap.defaults.headUp, true, "heading up unless switched off");
+  assert.ok(Number.isInteger(layout.widgets[1].zoom ?? 17) && (layout.widgets[1].zoom ?? 17) <= 19, "a zoom beyond the map's is not kept");
+  assert.ok(warnings.length >= 0);
+});

@@ -35,6 +35,7 @@ MAX_SKIN_ENTRIES = 200
 MAX_VEHICLE_RULES = 100
 # Alerts the user switched off (their ids are defined in web/js/alerts.js; only the shape is checked here, so adding an
 # alert never means touching Python).
+TRIP_IDLE_CHOICES = (1, 2, 5, 10, 30)  # minutes a car may be parked before a trip ends
 MAX_ALERTS_OFF = 40
 # A vehicle key is the model folder from the game ("/vehicles/etkc/" -> "etkc").
 VEHICLE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}$")
@@ -219,6 +220,22 @@ def validate_settings(raw):
                     raise ValidationError(f"alerts.off: {alert_id!r} is not a valid alert id")
             clean_alerts["off"] = sorted(set(off))
         clean["alerts"] = clean_alerts
+    idle = raw.get("tripIdleEndMin")
+    if idle is not None:
+        if isinstance(idle, bool) or idle not in TRIP_IDLE_CHOICES:
+            raise ValidationError(f"tripIdleEndMin: must be one of {', '.join(str(c) for c in TRIP_IDLE_CHOICES)} (minutes)")
+        clean["tripIdleEndMin"] = idle
+    notices = raw.get("tripNotices")
+    if notices is not None:
+        if not isinstance(notices, dict):
+            raise ValidationError("tripNotices: must be an object")
+        clean_notices = {}
+        for key in ("game", "gameStart", "window"):
+            if key in notices:
+                if not isinstance(notices[key], bool):
+                    raise ValidationError(f"tripNotices.{key}: must be true or false")
+                clean_notices[key] = notices[key]
+        clean["tripNotices"] = clean_notices
     default_layout = raw.get("defaultLayout")
     if default_layout is not None:
         if not isinstance(default_layout, str) or not LAYOUT_ID_RE.match(default_layout):

@@ -34,3 +34,8 @@ export function dashboardUrl(id, { menu = false, windowId = null } = {}, origin 
 export function openDashboardWindow(id, { menu = true, insetRight = 0 } = {}) {
   return window.open(dashboardUrl(id, { menu, windowId: randomWindowId() }), "_blank", sameSizeFeatures({ insetRight }));
 }
+
+/** The address of a Trips (map) window `windowId`: the id is what lets ThrashDash remember its size and place and reopen it. */
+export function tripsUrl(windowId, origin = location.origin) {
+  return `${origin}/trips?w=${windowId}`;
+}

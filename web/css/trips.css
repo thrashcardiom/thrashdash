@@ -1,0 +1,160 @@
+/* The Trips page. Same colours as the dashboard (see dash.css); this page scrolls, the dashboard does not. */
+:root {
+  --bg: #0b0e13;
+  --panel: #141922;
+  --track: #232b38;
+  --text: #e8edf4;
+  --muted: #7d8a9c;
+  --accent: #35c2ff;
+  --ok: #3ddc84;
+  --warn: #ffb020;
+  --crit: #ff4d4d;
+  --font: "Jost", "Segoe UI", system-ui, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 16px; -webkit-tap-highlight-color: transparent; }
+button, input { font: inherit; color: inherit; }
+.muted { color: var(--muted); }
+[hidden] { display: none !important; } /* (an element's own display rule would otherwise beat the hidden attribute) */
+
+#app { display: grid; grid-template-columns: 340px minmax(0, 1fr); height: 100%; }
+
+/* ---- the list ---- */
+#side { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--track); background: var(--panel); }
+.side-head { display: flex; align-items: baseline; gap: 12px; padding: 16px 16px 10px; }
+.side-head h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.04em; }
+.live { margin: 0 12px 8px; padding: 6px 10px; border-radius: 8px; background: rgba(53, 194, 255, 0.12); color: var(--accent); font-size: 14px; }
+.auto { display: flex; align-items: center; gap: 8px; margin: 0 12px 8px; font-size: 14px; color: var(--muted); }
+.popups { margin: 0 12px 8px; padding: 6px 10px; border-radius: 8px; background: var(--bg); font-size: 14px; }
+.popups summary { cursor: pointer; color: var(--muted); }
+.popups label { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.popups .btn.small { margin: 8px 0 0; }
+.pop-group { margin: 8px 0 0; padding: 0 0 4px; border: 0; }
+.pop-group legend { padding: 0; font-weight: 600; color: var(--text); }
+.popups .idle { display: block; line-height: 1.8; }
+.popups select { padding: 2px 6px; background: var(--track); border: 0; border-radius: 6px; color: var(--text); }
+.popups p { margin: 6px 0 0; font-size: 12px; }
+.list { list-style: none; margin: 0; padding: 0 8px 16px; overflow-y: auto; flex: 1; min-height: 0; }
+.item { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 10px 12px; text-align: left; background: transparent; border: 0; border-radius: 10px; cursor: pointer; position: relative; }
+.item:hover { background: var(--track); }
+.item[aria-current="true"] { background: var(--track); box-shadow: inset 3px 0 0 var(--accent); }
+.item:focus-visible, .btn:focus-visible, .base button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.item-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-sub { font-size: 13px; }
+.badge { position: absolute; right: 10px; top: 10px; padding: 1px 8px; border-radius: 99px; background: var(--accent); color: #04121c; font-size: 12px; font-weight: 600; }
+.empty { margin: 24px 20px; color: var(--muted); line-height: 1.5; }
+
+/* ---- one trip ---- */
+#main { min-width: 0; min-height: 0; overflow-y: auto; }
+#detail, #overview { display: flex; flex-direction: column; gap: 14px; padding: 14px 18px 28px; max-width: 1100px; }
+.head { display: flex; align-items: center; gap: 14px; }
+.titles { flex: 1; min-width: 0; }
+.titles h2, #overview h2 { margin: 0; font-size: 24px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.titles p { margin: 2px 0 0; font-size: 14px; }
+.actions { display: flex; gap: 8px; }
+.btn { padding: 8px 14px; background: var(--track); border: 0; border-radius: 8px; cursor: pointer; }
+a.btn { display: inline-block; text-decoration: none; color: inherit; }
+.btn:hover { background: #2d3747; }
+.btn.danger[data-sure="1"] { background: var(--crit); color: #1a0505; font-weight: 600; }
+.back { display: none; }
+.rename-input { width: 100%; padding: 4px 8px; font-size: 22px; font-weight: 600; background: var(--bg); border: 2px solid var(--accent); border-radius: 8px; outline: none; }
+
+.btn.small { margin-left: auto; padding: 4px 12px; font-size: 14px; }
+.btn.small[aria-pressed="true"] { background: var(--accent); color: #04121c; font-weight: 600; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.filters label { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+.filters select { padding: 6px 8px; background: var(--panel); border: 1px solid var(--track); border-radius: 8px; color: var(--text); }
+#ovmap { height: min(62vh, 640px); min-height: 300px; background: #1b222d; }
+.mapbox { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--track); }
+#map { height: min(52vh, 520px); min-height: 280px; background: #1b222d; }
+.base { position: absolute; top: 10px; left: 56px; z-index: 1000; display: flex; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5); }
+.base button { padding: 6px 12px; background: rgba(20, 25, 34, 0.9); border: 0; cursor: pointer; font-size: 14px; }
+.base button[aria-pressed="true"] { background: var(--accent); color: #04121c; font-weight: 600; }
+.legend { position: absolute; left: 10px; bottom: 26px; z-index: 1000; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 8px; background: rgba(20, 25, 34, 0.85); font-size: 12px; }
+.ramp { display: flex; width: 90px; height: 8px; border-radius: 4px; overflow: hidden; }
+.ramp span { flex: 1; }
+.leaflet-container { font-family: var(--font); }
+
+/* Heading up: the map is made larger than its box (so its corners still cover the box when turned), turned about its middle, and
+   the box clips it. Dragging is off then (the map follows the car), so the zoom buttons and the credit, which would turn with the
+   map and fall outside the box, are drawn by the page instead. */
+.rot-ui { display: none; }
+.mapbox.rotating #map { position: absolute; left: 50%; top: 50%; width: var(--d); height: var(--d); min-height: 0; margin: calc(var(--d) / -2) 0 0 calc(var(--d) / -2); transform: rotate(var(--rot, 0deg)); transform-origin: 50% 50%; pointer-events: none; }
+.mapbox.rotating .leaflet-control-container { display: none; }
+.mapbox.rotating .rot-zoom { display: flex; flex-direction: column; position: absolute; top: 10px; left: 10px; z-index: 1000; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5); }
+.rot-zoom button { width: 34px; height: 34px; border: 0; background: #fff; color: #000; font-size: 20px; line-height: 1; cursor: pointer; }
+.rot-zoom button + button { border-top: 1px solid #ccc; }
+.mapbox.rotating .rot-attrib { display: block; position: absolute; right: 0; bottom: 0; z-index: 1000; max-width: 80%; padding: 0 6px; background: rgba(255, 255, 255, 0.8); color: #333; font-size: 11px; line-height: 16px; }
+.rot-attrib a { color: #0078a8; }
+.mapbox.rotating .base { left: 56px; }
+
+.replay { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; background: var(--panel); border-radius: 10px; }
+.replay .play { min-width: 76px; background: var(--accent); color: #04121c; font-weight: 600; }
+.replay .play:hover { background: #5fd0ff; }
+.replay .live-btn { background: var(--ok); color: #04130a; font-weight: 600; }
+.replay .play:disabled, .replay input:disabled, .replay select:disabled { opacity: 0.4; cursor: default; }
+#scrub { flex: 1 1 200px; min-width: 120px; accent-color: var(--accent); }
+.clock { font-size: 14px; color: var(--muted); min-width: 120px; text-align: center; }
+.rate, .follow { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+.rate select { padding: 4px 6px; background: var(--track); border: 0; border-radius: 6px; }
+.readout { flex-basis: 100%; min-height: 1.3em; font-size: 15px; font-weight: 600; }
+.readout.over { color: var(--crit); }
+.car { color: #fff; font-size: 28px; line-height: 22px; text-align: center; text-shadow: 0 0 3px #000, 0 0 6px #000; }
+.car span { display: block; } /* (no transition: turning 359 to 1 degrees would spin the long way) */
+svg .replay-rule { stroke: var(--accent); stroke-width: 2; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.tile { display: flex; flex-direction: column; gap: 1px; padding: 10px 12px; background: var(--panel); border-radius: 10px; }
+.tile-label { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+.tile-value { font-size: 22px; font-weight: 600; }
+.tile-sub { font-size: 13px; }
+.tile.warn .tile-value { color: var(--warn); }
+.tile.muted .tile-value { color: var(--muted); font-size: 18px; }
+
+.graphbox { position: relative; background: var(--panel); border-radius: 10px; padding: 8px 8px 4px; }
+#graph svg { display: block; width: 100%; touch-action: none; }
+.tip { position: absolute; top: 0; transform: translate(-50%, -4px); padding: 3px 8px; background: #000c; border-radius: 6px; font-size: 13px; white-space: nowrap; pointer-events: none; }
+.key { margin: 4px 4px 2px; font-size: 12px; }
+svg .grid { stroke: var(--track); stroke-width: 1; }
+svg .axis { fill: var(--muted); font-size: 11px; }
+svg .axis.end { text-anchor: end; }
+svg .axis.mid { text-anchor: middle; }
+svg .alt { fill: rgba(125, 138, 156, 0.18); stroke: none; }
+svg .speed { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+svg .limit { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 5 3; }
+svg .over { fill: rgba(255, 59, 48, 0.28); }
+svg .rule { stroke: #fff; stroke-width: 1; opacity: 0.7; }
+
+/* ---- a narrow screen (a phone): the list, or the trip, one at a time ---- */
+@media (max-width: 899px) {
+  #app { grid-template-columns: 1fr; }
+  body[data-view="list"] #main { display: none; }
+  body[data-view="detail"] #side, body[data-view="all"] #side { display: none; }
+  .back { display: inline-block; }
+  #detail, #overview { padding: 10px 12px 24px; }
+  .head { flex-wrap: wrap; gap: 8px 10px; }
+  .back { order: 0; }
+  .actions { order: 1; margin-left: auto; }
+  .titles { order: 2; flex-basis: 100%; }
+  .titles h2 { font-size: 20px; white-space: normal; }
+  #map { height: 44vh; }
+  .base { left: 10px; top: 56px; }
+}
+
+/* ---- a trip shared as one html file: just the trip, with a note ---- */
+.static #app { grid-template-columns: 1fr; }
+.static #side, .static .back, .static .actions, .static #placeholder { display: none !important; }
+.share-foot { display: none; margin: 4px 18px 24px; font-size: 13px; color: var(--muted); max-width: 1100px; }
+.static .share-foot { display: block; }
+.share-foot a { color: var(--accent); }
+
+
+/* ---- embedded in a dashboard (the live map widget, /trips?embed=1): the map and nothing else ---- */
+.embed #app { grid-template-columns: 1fr; }
+.embed #side, .embed .head, .embed #replay, .embed #tiles, .embed .graphbox, .embed .share-foot, .embed .legend, .embed .base, .embed #overview { display: none !important; }
+.embed #main { display: block !important; overflow: hidden; }
+.embed #detail { padding: 0; gap: 0; max-width: none; height: 100vh; }
+.embed .mapbox { border: 0; border-radius: 0; height: 100vh; }
+.embed #map { height: 100vh; min-height: 0; }
+.embed #placeholder:not([hidden]) { display: flex !important; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; padding: 0 16px; }

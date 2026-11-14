@@ -143,6 +143,10 @@ class SettingsStore:
     """Display and behaviour settings kept by the relay (units, per-dashboard looks, the default dashboard, vehicle rules)."""
 
     DEFAULTS = {"units": {"speed": "kmh", "temp": "c", "distance": "km", "pressure": "psi", "economy": "auto"}, "defaultLayout": "default", "skins": {}, "vehicleDashboards": {}, "autoSwitch": True, "lan": False, "alerts": {"enabled": True, "off": []},
+                # popups about trips: in the game when one ends (and, if asked, starts), and a banner on the dashboard windows when one ends
+                "tripNotices": {"game": True, "gameStart": False, "window": True},
+                # how long the car may be parked before a trip ends, in minutes
+                "tripIdleEndMin": 2,
                 # reopen the dashboard windows that were open last time; and place them exactly (X11 mode on Wayland)
                 "restoreWindows": True, "exactWindowPlacement": False}
 
@@ -152,7 +156,7 @@ class SettingsStore:
     @classmethod
     def _fresh(cls):
         d = cls.DEFAULTS
-        return {"units": dict(d["units"]), "defaultLayout": d["defaultLayout"], "skins": {}, "vehicleDashboards": {}, "autoSwitch": d["autoSwitch"], "lan": d["lan"], "alerts": {"enabled": True, "off": []},
+        return {"units": dict(d["units"]), "defaultLayout": d["defaultLayout"], "skins": {}, "vehicleDashboards": {}, "autoSwitch": d["autoSwitch"], "lan": d["lan"], "alerts": {"enabled": True, "off": []}, "tripNotices": dict(d["tripNotices"]), "tripIdleEndMin": d["tripIdleEndMin"],
                 "restoreWindows": d["restoreWindows"], "exactWindowPlacement": d["exactWindowPlacement"]}
 
     def get(self):
@@ -172,6 +176,9 @@ class SettingsStore:
         if "lan" in stored:
             merged["lan"] = stored["lan"]
         merged["alerts"].update(stored.get("alerts", {}))
+        merged["tripNotices"].update(stored.get("tripNotices", {}))
+        if "tripIdleEndMin" in stored:
+            merged["tripIdleEndMin"] = stored["tripIdleEndMin"]
         for flag in ("restoreWindows", "exactWindowPlacement"):
             if flag in stored:
                 merged[flag] = stored[flag]
@@ -200,6 +207,9 @@ class SettingsStore:
         if "lan" in patch:
             current["lan"] = patch["lan"]
         current["alerts"].update(patch.get("alerts", {}))
+        current["tripNotices"].update(patch.get("tripNotices", {}))
+        if "tripIdleEndMin" in patch:
+            current["tripIdleEndMin"] = patch["tripIdleEndMin"]
         for flag in ("restoreWindows", "exactWindowPlacement"):
             if flag in patch:
                 current[flag] = patch[flag]

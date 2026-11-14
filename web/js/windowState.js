@@ -43,7 +43,7 @@ export const sameReport = (a, b) => a !== null && b !== null && JSON.stringify(a
  * Everything it touches is passed in, so it can be tested without a browser.
  * @param {object} o
  *   id          this window's id
- *   state()     { id: dashboard id or null, pinned: bool }
+ *   state()     { id: dashboard id or null, pinned: bool, kind?: "trips" for the map window (a dashboard window needs none) }
  *   send(body)  deliver a report (body includes the stamp); failures are ignored
  *   forget(stamp)  say the window closed
  *   geometry()  readGeometry
@@ -58,7 +58,7 @@ export function createWindowReporter({ id, state, send, forget, geometry = readG
   let heartbeat = null;
   let poll = null;
 
-  const body = () => ({ dashboard: state().id ?? null, pinned: state().pinned === true, ...geometry() });
+  const body = () => ({ ...(state().kind ? { kind: state().kind } : {}), dashboard: state().id ?? null, pinned: state().pinned === true, ...geometry() });
 
   function report(force = false) {
     const current = body();

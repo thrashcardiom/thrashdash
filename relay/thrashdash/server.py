@@ -1,5 +1,6 @@
 """HTTP + WebSocket server: serves the dashboard and streams telemetry to it."""
 import asyncio
+from collections import deque
 import json
 from urllib.parse import quote, urlencode, urlparse
 
@@ -9,7 +10,7 @@ from . import __version__
 from .auth import COOKIE_NAME, AuthStore
 from .lifecycle import WindowCounter
 from .windows import WindowRegistry
-from .api import AUTH, HUB, LAN_CONTROLLER, LAYOUTS, LOCAL_CHECK, SETTINGS, WINDOWS, add_routes, check_write_allowed, set_session_cookie
+from .api import AUTH, CONFIGS, HUB, LAN_CONTROLLER, LAYOUTS, LOCAL_CHECK, NOTICES, PAGELOG, SETTINGS, TRIPLOG, WINDOW_OPENER, WINDOWS, add_routes, check_write_allowed, set_session_cookie
 from .lan import LanController
 from .netinfo import host_allowed, is_local_client
 from .paths import web_root
@@ -21,8 +22,18 @@ PUSH_HZ = 30
 # 'unsafe-inline' is for styles only (SVG presentation attributes the widgets set at runtime).
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'"
+    "img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'"
 )
+
+# The Trips page draws a map, so it also loads map tiles (pictures) from two servers, and only those two: the street map and
+# the satellite picture. Everything else stays as strict as for the dashboard, and the dashboard's own policy is unchanged.
+TILE_HOSTS = "https://tile.openstreetmap.org https://tiles.maps.eox.at"
+TRIPS_CSP = CSP.replace("img-src 'self' data:", f"img-src 'self' data: {TILE_HOSTS}")
+TRIPS_PAGES = {"/trips", "/trips.html"}
+# OpenStreetMap's tile servers REFUSE requests that carry no Referer (their usage policy; they answer with a picture saying
+# "Access blocked"). The rest of ThrashDash sends none. The Trips page sends the least that satisfies them: the origin only
+# (for example http://127.0.0.1:8765/), never the path, so no trip id or sign-in token goes anywhere.
+TRIPS_REFERRER_POLICY = "origin"
 
 
 PORT = web.AppKey("port", int)
@@ -36,10 +47,10 @@ LOGIN_PATH = "/api/pin/login"
 SIGN_IN_FILES = {PIN_PAGE, "/js/pin.js", "/css/pin.css"}
 
 
-def _harden(response):
-    response.headers["Content-Security-Policy"] = CSP
+def _harden(response, path=None):
+    response.headers["Content-Security-Policy"] = TRIPS_CSP if path in TRIPS_PAGES else CSP
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Referrer-Policy"] = TRIPS_REFERRER_POLICY if path in TRIPS_PAGES else "no-referrer"
     response.headers["Cache-Control"] = "no-store"  # a dashboard edited between runs must never show stale JS
     return response
 
@@ -114,7 +125,7 @@ async def guard(request, handler):
         response = await handler(request)
     except web.HTTPException as exc:  # error responses (404, 413...) get the same hardening headers
         response = exc
-    _harden(response)
+    _harden(response, request.path)
     if isinstance(response, web.HTTPException):
         raise response
     return response
@@ -122,6 +133,10 @@ async def guard(request, handler):
 
 async def index(request):
     return web.FileResponse(web_root() / "index.html")
+
+
+async def trips_page(request):
+    return web.FileResponse(web_root() / "trips.html")
 
 
 async def api_status(request):
@@ -134,12 +149,27 @@ async def ws_handler(request):
     ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024)
     await ws.prepare(request)
     remote = not request.app[LOCAL_CHECK](request.remote)
+    # /ws?feed=geo: the Trips page's live map wants only the car's position, ten a second, not the dashboard's telemetry
+    geo_only = request.query.get("feed") == "geo"
     if remote:
         request.app[REMOTE_SOCKETS].add(ws)  # so switching network access off can drop them straight away
-    else:
+    elif not geo_only:
         request.app[WINDOW_COUNTER].connected()  # an open dashboard window on this computer (see lifecycle.py)
 
+    notices = request.app[NOTICES]
+    seen_notice = notices.seq if notices is not None else 0  # (a window opened now is not told about trips that ended before it)
+
+    async def geo_writer():
+        seen = hub.live_seq  # (a map opened now starts from now, not from positions already gone by)
+        await ws.send_json({"type": "hello", "relay": __version__, "protocol": 1, "feed": "geo"})
+        while not ws.closed:
+            for message in hub.live_since(seen):
+                seen = message["seq"]
+                await ws.send_json(message)
+            await asyncio.sleep(1.0 / PUSH_HZ)
+
     async def writer():
+        nonlocal seen_notice
         seen_catalog = seen_frame = -1
         last_status = None
         interval = 1.0 / PUSH_HZ
@@ -155,9 +185,13 @@ async def ws_handler(request):
             if hub.frame_seq != seen_frame and hub.frame_seq > 0:  # never send the empty pre-data state as a "frame"
                 seen_frame = hub.frame_seq
                 await ws.send_str(hub.frame_json())
+            if notices is not None:
+                for notice in notices.since(seen_notice):
+                    seen_notice = notice["id"]
+                    await ws.send_json(notice)
             await asyncio.sleep(interval)
 
-    task = asyncio.create_task(writer())
+    task = asyncio.create_task(geo_writer() if geo_only else writer())
     try:
         # Reading is what lets aiohttp notice the browser closing the socket. Browser->relay
         # messages are ignored: editing goes through the REST API, not the telemetry socket.
@@ -165,7 +199,7 @@ async def ws_handler(request):
             pass
     finally:
         request.app[REMOTE_SOCKETS].discard(ws)
-        if not remote:
+        if not remote and not geo_only:
             request.app[WINDOW_COUNTER].disconnected()
         task.cancel()
         try:
@@ -178,12 +212,17 @@ async def ws_handler(request):
 MAX_BODY = 256 * 1024  # a layout is a few KB; this bounds what any write can make us buffer
 
 
-def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_client, windows=None, auth=None):
+def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_client, windows=None, auth=None, triplog=None, notices=None, configs=None):
     """Build the web application. `lan` controls network access (default: an inert controller, i.e. off).
     `local_check(remote_address)` says whether a client is this computer; tests replace it to play a remote device."""
     app = web.Application(middlewares=[guard], client_max_size=MAX_BODY)
     lan = lan or LanController(http_port)
     app[HUB] = hub
+    app[TRIPLOG] = triplog if triplog is not None else getattr(hub, "triplog", None)
+    app[PAGELOG] = deque(maxlen=400)  # what the Trips page says it is doing (api.post_pagelog)
+    app[CONFIGS] = configs  # saved sets of windows (configs.ConfigStore), or None
+    app[WINDOW_OPENER] = {}  # filled in by __main__ once it can launch windows
+    app[NOTICES] = notices  # trip popups for the dashboard windows (tripnotice.TripNotices), or None
     app[PORT] = http_port
     app[LAN_CONTROLLER] = lan
     app[LOCAL_CHECK] = local_check
@@ -202,11 +241,14 @@ def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_c
 
     async def save_state(_app):
         hub.trips.save()  # keep the trip meters and the list of open windows when ThrashDash is closed
+        if app[TRIPLOG] is not None:
+            app[TRIPLOG].close_all("shutdown")  # end the trip being recorded
         app[WINDOWS].flush()
 
     app.on_shutdown.append(save_state)
     add_routes(app)
     app.router.add_get("/", index)
+    app.router.add_get("/trips", trips_page)
     app.router.add_get("/ws", ws_handler)
     app.router.add_get("/api/status", api_status)
     # Registered last so the explicit routes above win. follow_symlinks stays off: the web root

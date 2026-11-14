@@ -17,6 +17,7 @@ from .store import _atomic_write_json
 from .validate import LAYOUT_ID_RE, ValidationError
 
 WINDOW_ID_RE = re.compile(r"^[a-z0-9]{6,24}$")
+KINDS = ("dashboard", "trips")  # what a window shows: a dashboard, or the Trips page (the map window)
 MAX_WINDOWS = 12
 STALE_AFTER_S = 30 * 24 * 3600  # a window not heard from for a month is not coming back
 MIN_SIZE, MAX_SIZE = 200, 10000
@@ -48,7 +49,10 @@ def clean_window(raw):
     dashboard = raw.get("dashboard")
     if dashboard is not None and (not isinstance(dashboard, str) or not LAYOUT_ID_RE.match(dashboard)):
         raise ValidationError("dashboard: not a valid dashboard id")
-    entry = {"dashboard": dashboard, "pinned": raw.get("pinned") is True, "fullscreen": raw.get("fullscreen") is True}
+    kind = raw.get("kind", "dashboard")
+    if kind not in KINDS:
+        raise ValidationError(f"kind: must be one of {', '.join(KINDS)}")
+    entry = {"kind": kind, "dashboard": dashboard, "pinned": raw.get("pinned") is True, "fullscreen": raw.get("fullscreen") is True}
     # A size or position that makes no sense (a minimised window reports 0 by 0, a headless browser the same) is "not known",
     # not an error: the report must still be accepted, or that window would never be remembered.
     entry["width"] = _int(raw["width"], "width", MIN_SIZE, MAX_SIZE, lenient=True) if raw.get("width") is not None else None
@@ -59,7 +63,10 @@ def clean_window(raw):
 
 
 def window_path(wid, entry):
-    """The address (path and query) that reopens this window: pinned to its dashboard if it was, always carrying its id."""
+    """The address (path and query) that reopens this window: the Trips page for the map window, else pinned to its dashboard if
+    it was; always carrying its id."""
+    if entry.get("kind") == "trips":
+        return f"/trips?w={wid}"
     if entry.get("pinned") and entry.get("dashboard"):
         return f"/?d={entry['dashboard']}&w={wid}"
     return f"/?w={wid}"
@@ -158,6 +165,27 @@ class WindowRegistry:
             self.save()
         return True
 
+    def live_entries(self):
+        """The windows open right now, as {id: entry} without the bookkeeping: what a saved config captures."""
+        return {wid: {k: v for k, v in self.entries[wid].items() if k != "seen"} for wid in sorted(self._live) if wid in self.entries}
+
+    def adopt(self, windows):
+        """Make `windows` ({id: entry}, from a saved config) the set of windows to open at start-up, in place of whatever the last run
+        left behind (windows open right now are kept as they are). Saves the result."""
+        now = self._wall()
+        adopted = {wid: self.entries[wid] for wid in self._live if wid in self.entries}
+        for wid, entry in windows.items():
+            if wid in adopted or len(adopted) >= MAX_WINDOWS:
+                continue
+            try:
+                cleaned = clean_window(entry)
+            except ValidationError:
+                continue
+            cleaned["seen"] = now
+            adopted[wid] = cleaned
+        self.entries = adopted
+        self.save()
+
     @property
     def live(self):
         """Windows heard from since this relay started, i.e. open right now."""
@@ -187,12 +215,13 @@ def plan_restore(entries, live, enabled, exact):
     return plan[:MAX_WINDOWS]
 
 
-async def open_windows(registry, settings, open_window, base_url, profile_in_use, sleep, default_size=DEFAULT_SIZE, gap_s=0.7):
+async def open_windows(registry, settings, open_window, base_url, profile_in_use, sleep, default_size=DEFAULT_SIZE, gap_s=0.7, configs=None):
     """Open the dashboard window(s) at startup. Returns how many were opened.
 
     The windows left open by the previous run (the relay was only restarted) reconnect by themselves within a moment, so
     when a browser may still have them open we wait briefly and then open only the ones that did not come back. Otherwise:
-    reopen what was open last time (if the setting is on), or just the one default window as always.
+    reopen the windows of the config that was last saved or picked (if there is one), else what was open last time (if the setting
+    is on), or just the one default window as always.
     `open_window(url, size, position, fullscreen, x11)` starts one window; both it and `sleep` are passed in so this can
     be tested without a browser or a clock.
     """
@@ -200,6 +229,9 @@ async def open_windows(registry, settings, open_window, base_url, profile_in_use
         await sleep(REATTACH_GRACE_S)
     prefs = settings.get()
     exact = prefs.get("exactWindowPlacement") is True
+    saved = configs.active_windows() if configs is not None else None
+    if saved and prefs.get("restoreWindows") is not False:
+        registry.adopt(saved)  # the last saved config, not whatever the last run happened to leave open
     plan = plan_restore(registry.entries, registry.live, prefs.get("restoreWindows") is not False, exact)
     opened = 0
     for i, item in enumerate(plan):
@@ -209,5 +241,19 @@ async def open_windows(registry, settings, open_window, base_url, profile_in_use
             opened += 1
     if not plan and not registry.live:
         if open_window(base_url + "/", default_size, None, False, exact):
+            opened += 1
+    return opened
+
+
+async def open_config_windows(registry, windows, exact, open_window, base_url, sleep, gap_s=0.7):
+    """Open the windows of a config ({id: entry}) that are not open already (picking a config while ThrashDash runs). Windows that are
+    open stay as they are, and so do any not in the config: ThrashDash cannot close another program's window. Returns how many
+    were opened. `open_window(url, size, position, fullscreen, x11)` starts one."""
+    plan = plan_restore(windows, registry.live, True, exact)
+    opened = 0
+    for i, item in enumerate(plan):
+        if i:
+            await sleep(gap_s)
+        if open_window(base_url + item["path"], item["size"], item["position"], item["fullscreen"], exact):
             opened += 1
     return opened

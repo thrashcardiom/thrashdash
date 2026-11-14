@@ -34,6 +34,26 @@ export const api = {
   setLanPin: (pin) => call("PUT", "/api/lan/pin", { pin }),
   /** A single-use token for the QR code, so scanning it signs a phone in without typing the PIN. */
   lanToken: () => call("POST", "/api/lan/token", {}),
+  /** The trip log (BeamNG.Earth): {enabled, status, trips}, one trip in full, and the two changes the Trips page can make. */
+  listTrips: () => call("GET", "/api/triplog"),
+  /** Every trip's thinned route, with what the all-trips filters need. */
+  /** Saved configs (sets of windows, the map window included): {active, open, changed, configs: [{id, name, windows}]}. Save as is
+   *  createConfig, Save is saveConfig (overwrites with the windows open now), picking is activateConfig (also opens its windows). */
+  listConfigs: () => call("GET", "/api/configs"),
+  createConfig: (name) => call("POST", "/api/configs", { name }),
+  saveConfig: (id) => call("PUT", `/api/configs/${encodeURIComponent(id)}`, {}),
+  activateConfig: (id) => call("PUT", "/api/configs/active", { id }),
+  deleteConfig: (id) => call("DELETE", `/api/configs/${encodeURIComponent(id)}`),
+  /** The Trips page's own log lines, kept by the relay (GET /api/pagelog) so a problem seen on a real screen can be read afterwards. */
+  pageLog: (lines) => call("POST", "/api/pagelog", { lines }),
+  /** A popup now, to the game and the dashboard windows: {ok, game}. */
+  testPopup: () => call("POST", "/api/triplog/test-popup", {}),
+  listRoutes: () => call("GET", "/api/triplog/routes"),
+  /** What a trip has gained since `after` seconds into it: {points, info, events, end} (for following a trip being driven). */
+  liveTrip: (id, after) => call("GET", `/api/triplog/${encodeURIComponent(id)}/live?after=${encodeURIComponent(after)}`),
+  getTrip: (id) => call("GET", `/api/triplog/${encodeURIComponent(id)}`),
+  renameTrip: (id, name) => call("PATCH", `/api/triplog/${encodeURIComponent(id)}`, { name }),
+  deleteTrip: (id) => call("DELETE", `/api/triplog/${encodeURIComponent(id)}`),
   getClient: () => call("GET", "/api/client"),
   getSettings: () => call("GET", "/api/settings"),
   saveSettings: (patch) => call("PUT", "/api/settings", patch),

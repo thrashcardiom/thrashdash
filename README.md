@@ -490,6 +490,18 @@ A dot that moves with the force on the car, with a trail and a held peak. Layout
 | `flipLateral` | on/off | Reverse left and right |  |
 | `flipLongitudinal` | on/off | Reverse up and down |  |
 
+### Live map (BeamNG.Earth)
+
+A live map of the trip being driven, on a dashboard, placed and sized like any other widget and saved with the dashboard (**Save** overwrites it, **Save as** makes a copy). It is the Trips page's own map in a compact form (a frame of `/trips?embed=1`), so it follows the car, can turn **heading up**, and draws the route exactly as the Trips page does; it reads "Waiting for a trip" until one starts, then opens each new trip by itself. Needs BeamNG.Earth and internet for the map pictures (street map, or the satellite picture if ticked). Layout type: `tripmap`. Default size 420 × 300.
+
+| Property | Type | What it does | Values |
+|:---|:---|:---|:---|
+| `headUp` | on/off | The car points up and the map turns round it | default on |
+| `zoom` | number | Zoom while following the car | 12 to 19, default 17 |
+| `satellite` | on/off | The satellite picture instead of the street map (blurry close up) |  |
+
+Because the map needs pictures from two map servers, the dashboard page's policy now allows a frame of this site (`frame-src 'self'`); the frame is the Trips page, which alone is allowed to load the map pictures (see [The Trips page](#trip-log-beamngearth)).
+
 ### Trip computer
 
 One of the two trip meters (see [Trip computer](#trip-computer)). Layout type: `trip`. Default size 300 × 340.
@@ -609,6 +621,35 @@ Two trip meters, **A** and **B**, like a car has. Each counts distance, time, av
 - **Units**: *Fuel economy* under the editor's **Display** section. *Follow distance unit* (the default) gives L/100 km with kilometres and mpg (US) with miles; or choose L/100 km, km/L, mpg (US) or mpg (UK). An electric car shows kWh/100 km, km/kWh or mi/kWh instead.
 - The trip numbers are also channels (`trip.A.distance`, `trip.B.consumption`, and so on) you can put on any gauge or readout; the picker lists them under **Trip computer**.
 
+### Trip log (BeamNG.Earth)
+
+With [BeamNG.Earth](https://github.com/TecnaGamer/BeamNG.Earth) (the real-world map) ThrashDash also keeps a **log of every drive**: where you went, how far, how fast, and what the car was doing. This is separate from the trip meters A and B above, which count until you reset them; the log makes a new trip each time you drive.
+
+**Status: recording, summaries and a Trips page** (single trip: map, figures, graph; renaming and deleting). Still to come: the Google map option.
+
+- **Needs BeamNG.Earth** (its level loaded). Without it the log does nothing and costs nothing.
+- **What starts and ends a trip.** A trip starts when the car moves and ends when it has been parked for 2 minutes (your choice of 1, 2, 5, 10 or 30 in the **Popups and settings** box on the Trips page, applied at once, even to a trip being driven), when you teleport, when you jump back to the spawn point or are otherwise moved (a jump in position ends it, even with no teleport event), when you take another vehicle, or when the game stops sending. A trip under 50 m or 20 s (a nudge of the car) is not kept. Pressing the reset key does not end a trip.
+- **Latitude and longitude only.** The game moves its own origin when you teleport, so its x/y positions mean nothing later; the log keeps real coordinates.
+- **What a trip holds**: a position about every 4 m or 10 s or when the car turns (the distance counts every second regardless, so thinning loses none), speed, heading and altitude, fuel or charge and body damage while the car is sending, and the world around the car: the **speed limit is read every second**, the street, place, region and country every 2 seconds, and the weather and the route's progress every 10 (the weather changes slowly, and BeamNG.Earth's place name lags a jump by several seconds, so faster would not help). The speed limit is flagged when it is a posted one and not a guess from the kind of road. A reading is written into the trip only when the street or limit changed (a line is written at once), or every 10 seconds regardless, so reading often costs the file little. A change of the game extension needs BeamNG restarted.
+- **Crash-safe.** A trip is written as it is driven, one line at a time. If ThrashDash is closed or killed mid-trip, it ends the trip where it stopped the next time it starts.
+- **Summary of each trip** (stored on the trip's closing line and worked out again whenever the rules change; see [`relay/thrashdash/tripstats.py`](relay/thrashdash/tripstats.py)): a name ("Courtenay Place to Hutt Road", from the first place reported once the game has settled and the last one; a road number such as "2" is not a name, so the town is used), distance, time moving and stopped, average and top speed, the countries and towns passed through, altitude gained and lost, fuel or charge used and per 100 km, damage, weather (temperature, wind, rain time, poorest visibility), and **time over the speed limit**. Only about one limit in ten that BeamNG.Earth reports is a posted one (the rest are guessed from the kind of road), so speeding is counted **only where the limit is posted**, with a 3.6 km/h allowance for the game's speed reading, and the summary says how many seconds of the trip that covered. Peak G is not recorded yet.
+- **Popups.** When a trip ends, a message appears **in the game** (the way BeamNG.Earth shows its own messages) and a **banner on the dashboard windows** for 12 seconds (a click puts it away): for example *Trip finished: Courtenay Place to Hutt Road: 2.12 km, 2 min 26 s, top 110 km/h, 1 min 19 s over the limit, 0.45 L*, in your units. Messages stay on screen for 12 seconds (the game's own is 5, easy to miss while driving). Optionally the game also says when a trip **starts** (off by default; a trip counts as started once it is 50 m and 20 seconds long, so a nudge of the car says nothing). Choose which in the **Popups** box on the Trips page (only this computer can change them); **Send a test popup** there sends one now to the game and the dashboard windows, whatever is ticked, to see which way works (the game only gets it once it has sent a position, so a BeamNG.Earth level must be loaded). `beamng.log` gets a line, *message from ThrashDash shown*, for each message the game receives, and `GET /api/triplog` reports what has happened to popups since ThrashDash started (`notices`: sent to the game, game not reachable, banners). By default: game on at the end, banner on, game at the start off. The game's popup needs the game restarted after updating, as the game extension changed. How it reaches the game: the extension sends its positions from a socket bound to `127.0.0.1` (this computer only), and the relay answers to that address; the extension believes only datagrams from the relay's own address and shows only plain text, cut short.
+- **Window config: the map window is saved and reopened like a dashboard.** The Trips (map) window now tells ThrashDash its size and place just as a dashboard window does, so it is part of what ThrashDash remembers. The **Window config** section of the Dashboards menu saves the windows open now, the dashboards and the map window, each with its size and (where your system reports one) its place: **Save** overwrites the config that is loaded, **Save as…** asks for a name and makes a new one (the same way the dashboard editor saves), and **Delete** removes the loaded one. The menu says when the windows have changed since the save and what Save will overwrite. The config last saved or picked is the one **opened when ThrashDash starts**, in place of whatever the last run left open; with none saved it works as before (the windows open last time). Picking a config while ThrashDash runs makes it the one that opens and opens its windows that are not open yet (a window already open stays open: ThrashDash cannot close another program's window). With the setting to restore windows switched off, a config is not opened either. What a dashboard window *shows*, its gauges and live map widget, is saved with the dashboard itself in the editor. Only the ThrashDash computer can save or delete; window positions are saved but only used with exact placement, as for dashboard windows. Kept in `configs.json` in the data folder.
+- **The Trips page.** Dashboards menu, **Open the trip log** (or `http://127.0.0.1:8765/trips`; a phone on your network opens the same address with the PIN). A list of trips on the left (one at a time on a phone), and for the one picked:
+  - its **route on a map**, coloured from slow to fast (with a dark edge so it shows on any map), start and end marked, and a **red edge where the car was over a posted limit**. **Street** is the default; **Satellite** is a toggle. The satellite picture is about 10 metres a pixel, so it is blurry once you zoom in closely (the map stops adding detail past zoom 13); the street map is the one for following a route. The remembered choice is per browser;
+  - the **figures** (distance, time, speeds, fuel, climb, damage, weather, time over the limit, places);
+  - a **speed and altitude graph** along the trip with the posted limits drawn on it. Moving over it (or touching it) shows the speed, distance, time and height at that point and puts a marker on the map.
+  - **Replay.** The bar under the map drives the route again with a car marker pointing the way it was heading: **Play** and **Pause** (or the space bar), a slider to go anywhere in the trip, a speed of 1×, 4×, 16× or 64×, and **Follow** to keep the car in view, and **Heading up**: the car stays in the middle of the map pointing up and the map turns round it (zoom with the + and − buttons or the wheel; dragging is off while it is on, because the map follows the car; the choice is remembered). While it runs it shows the speed, the posted limit where one was read, and the distance; the readout turns red where the car was over the limit, and a line on the graph shows the same place. Opening another trip puts the replay back at the start.
+  - **All trips.** The **All trips** button above the list draws every trip's route on one map (thinned by the relay to the route's shape, so hundreds of trips stay quick), so the roads you drive most often are brightest. Filters by **when** (last 7 or 30 days, this year), **vehicle** and **country**, and totals for what is shown (trips, distance, driving time, longest trip, top speed). Hover a route to see which trip it is, click it to open it. A trip being driven appears in green and grows.
+  - **New trips open by themselves.** When a trip starts, the Trips page opens it and shows it on the map (once per trip, so you can look elsewhere afterwards). Untick **Open new trips automatically** above the list to stop that; the choice is remembered. It does not jump while you are typing a name, and the **All trips** map just adds the new trip in green without switching away. A phone opens it too.
+  - **A trip being driven is followed live.** Open (or auto-open) a trip that is still being recorded and the replay's car marker follows it: it drives along the map about two seconds behind the newest point (so it moves smoothly instead of jumping when new points arrive), and the page fetches only what is new about once a second. **Heading up** works on it too, keeping the car in the middle pointing up while the map turns; with it off, the map keeps the whole route in view and follows the car if it leaves the view. **Pause** (or the space bar, or dragging the slider) leaves the live view to look at something, and **Go live** comes back. When the trip ends the car finishes the route it has not yet shown.
+  - A trip still being recorded is shown as it grows: while one is being recorded, or the open trip is unfinished, the page re-reads it every 3 seconds (about as often as the game reports a position, once a second, allows; with nothing being recorded it only looks every 6 seconds for a new trip). The map moves to follow the car when it drives off the edge, unless you have moved the map somewhere else.
+  - **GPX and KML export.** The **GPX** and **KML** buttons beside the title download the trip as a file (any device that can open the page can, a phone included). GPX is for GPS and mapping programs: a timed track with speed and height, and a start and end point. KML is for **Google Earth** (no account or key): the route as a line on the ground, with a pin at each end and the trip's summary when you click it. The file also holds a timed track for the time slider of the Google Earth desktop program; it is hidden until you tick it in the Places list, because Earth would draw it over the line. The times are real (the trip's start plus each point's time into it), and KML lays the path on the ground so a wrong height cannot bury it in the terrain. Names are escaped and file names kept plain, so an odd trip name cannot make a file other programs refuse.
+  - **Share: one file anyone can open.** The **Share** button (for a finished trip) downloads a single `.html` file holding the trip's route on a map, the figures, the speed graph and the replay, with nothing to install and no ThrashDash needed: send it by email or chat, or put it on a web server. It is the Trips page's own program (not a copy that could drift), joined into one script by [`relay/thrashdash/tripshare.py`](relay/thrashdash/tripshare.py), with the map library, styles and the trip's data inside. What it contains: the trip's **positions**, speeds, heights, name and summary; not the car's id, fuel or damage readings, or your settings except your units. A policy written into the file lets it run only its own scripts (named by hash), load pictures only from the two map servers, and make no other requests. The map needs the internet for its pictures (the route and figures do not): a file opened from disk starts on the **satellite** picture, because OpenStreetMap refuses tile requests that carry no Referer and a page opened from disk sends none; on a web server the street map works too. Not shareable: a trip still being recorded, or the trip list (a shared file shows one trip).
+  - **Rename** (the name is kept as a line added to the trip's file) and **Delete** (the file moves to a `trash` folder inside `triplog/`; nothing is erased, so a trip can be put back by moving the file out) work only on the computer running ThrashDash, like every change; a phone can look but not change.
+  - **The map is the only part that uses the internet.** The page's browser asks OpenStreetMap or EOX for map pictures covering the area on screen. They can see your address and the area on screen, not your trips. OpenStreetMap refuses requests that carry no Referer, so for this page only ThrashDash lets the browser send the page's *origin* (for example `http://127.0.0.1:8765/`, never the trip or any sign-in token); every other page still sends none. Nothing about a trip is sent anywhere. Without internet the route and figures still show on a blank map. The Trips page is allowed to load pictures from those two servers and nothing else; the dashboard's own rules are unchanged. The map library ([Leaflet](https://leafletjs.com/)) is bundled.
+- **Where**: `triplog/` in the data folder, one `.jsonl` file per trip. The format is described at the top of [`relay/thrashdash/triplog.py`](relay/thrashdash/triplog.py).
+
 ### Per-vehicle dashboards
 
 In the Dashboards menu, under **Vehicle**, **Use this dashboard for &lt;vehicle&gt;** remembers which dashboard goes with the car you are driving (the vehicle is the model folder from the game, for example `etkc`). A window that has not been pinned to one dashboard then switches by itself when you change vehicle: to the vehicle's dashboard if it has one, otherwise to the default. A window you pinned (by choosing a dashboard from the menu, or opening it with **New window**) stays on it; **Follow the vehicle rules in this window** hands it back. **Switch automatically when the vehicle changes** turns the whole feature off, and the editor's **Vehicle dashboards** section lists every rule.
@@ -659,6 +700,8 @@ Inside the data folder:
 | `layouts/u-<12 hex>.json` | Your own dashboards |
 | `settings.json` | Settings (below) |
 | `trips.json` | Trips A and B |
+| `configs.json` | Saved window configs: sets of windows (dashboards and the map window) with their sizes and places |
+| `triplog/<id>.jsonl` | The trip log: one file per drive (BeamNG.Earth); deleted trips are moved to `triplog/trash/` |
 | `windows.json` | The remembered windows |
 | `auth.json` | The PIN for devices on the network, and the secret that signs their sign-in cookies (readable only by your user) |
 | `thrashdash.log` | The program's messages (AppImage only, when started from a desktop; the latest run) |
@@ -773,6 +816,16 @@ The relay serves the dashboard and a small JSON API on `http://127.0.0.1:8765`. 
 | `POST /api/lan/token` | A single-use sign-in token for the QR code (`{token, expiresIn}`). This computer only. |
 | `POST /api/pin/login` | A device on the network signs in (`{"pin": "4821"}`); the answer sets the sign-in cookie. Wrong guesses are slowed down (429 with `Retry-After`). |
 | `POST /api/trips/{A\|B}/reset` | Reset a trip. |
+| `GET /api/triplog` | The trip log: `{enabled, status: {recording, id, distance, duration}, trips: [...]}`, newest first, each with `id`, `ts`, `vehicle`, `ended`, `reason`, `distance` (m), `duration` (s), `top` (m/s), `points`, and `stats` (the summary, once it has ended). |
+| `POST /api/triplog/test-popup` | Send a popup now to the game and the dashboard windows: `{ok, game}` (`game` says whether it could be sent to the game). This computer only. |
+| `GET /api/configs`, `POST /api/configs` `{name}`, `PUT /api/configs/{id}`, `PUT /api/configs/active` `{id}`, `DELETE /api/configs/{id}` | Saved window configs (see above): the list with which one is loaded and whether the windows changed since it was saved; Save as is POST and Save is PUT (both take the windows open now); picking is PUT active, which opens the config's windows that are not open. Writes are this computer only. |
+| `GET /api/triplog/routes` | Every trip's route thinned to its shape for the all-trips map: `{enabled, trips: [{id, ts, vehicle, title, name, countries, dist, dur, top, recording, line: [[lat, lon], ...]}]}`. |
+| `GET /api/triplog/{id}/live?after=T` | What a trip has gained since `T` seconds into it: `{points, info, events, end}`, for following a trip being driven. |
+| `GET /api/triplog/{id}/share` | A finished trip as one self-contained html page (see Share above). 409 while it is being recorded. |
+| `GET /api/triplog/{id}/gpx`, `/kml` | The trip as a download (GPX 1.1, or KML with a `gx:Track` for Google Earth). 404 for an unknown trip or kind. |
+| `GET /api/triplog/{id}` | One trip in full: `{header, points, info, events, end, title, stats}` (`title` is the name the user gave it, or null; `stats.limits` also has `spans` and `posted` here, the time ranges over the limit and where a posted limit was read). 404 for an unknown or malformed id. |
+| `PATCH /api/triplog/{id}` | Rename an ended trip: `{"name": "..."}` (an empty name takes it away; at most 80 characters). 409 while it is being recorded. This computer only. |
+| `DELETE /api/triplog/{id}` | Move an ended trip to the trash folder. 409 while it is being recorded. This computer only. |
 | `GET /api/windows` | The remembered windows and which are open now. |
 | `PUT /api/windows/{id}` | A window reports itself (used by the dashboard). |
 | `DELETE /api/windows/{id}?t=<ms>` | A window was closed (used by the dashboard). |
@@ -814,6 +867,17 @@ The mod sends JSON datagrams over UDP to `127.0.0.1:4568`, only for the vehicle 
  "energy":{"electric":false,"liquid":true}}
 ```
 
+The trip log's own extension (BeamNG.Earth only; it runs in the game, not in a car) sends three more packet types to the same port:
+
+| Packet | Rate | Contents |
+|:---|:---|:---|
+| `geo` | every second | `lat`, `lon`, `alt`, `spd` (m/s), `hdg`, `ready` (false while the world loads: the game's speed is nonsense then, so the relay ignores the sample), `veh`, `model`, `rt` (real seconds since the extension loaded), `ts` (unix time) |
+| `geoinfo` | every 1 s | `limit` (`ms`, `mapped`, `unit`); with every 2nd one `place` (street, place, region, country); with every 10th `wx` (weather) and `gps` (route progress). A packet that leaves a part out means "not read this time" for `place`, `wx` and `gps`, and "no limit known" for `limit`. |
+| `toast` (relay to game) | when a trip ends or starts | the reverse direction: `{type: "toast", title, msg}`, sent to wherever the last `geo` packet came from; the game shows it on screen |
+| `geoevent` | when it happens | `name`: `teleported`, `worldReady`, `routeArrived`, `reset`, `vehicleSwitched`, `levelStart`, `levelEnd`; with `lat`, `lon` |
+
+These go to the trip log, not to the dashboard's channels. A packet that is malformed or out of range is counted and dropped.
+
 The relay flattens nested tables into dotted channel names (`wheelThermals.FL.brakeSurfaceTemperature`, `tire.FL.temp`, `damage.zone.FL`). An empty Lua table is encoded as `[]`, which the relay treats as "empty". The mod reads game state defensively: a missing game API loses one section, never the whole stream, and it disables itself after repeated errors rather than flooding the game log.
 
 ## Development
@@ -823,6 +887,12 @@ The relay flattens nested tables into dotted channel names (`wheelThermals.FL.br
 | Path | What |
 |:---|:---|
 | [`mod/lua/vehicle/extensions/auto/thrashdash_telemetry.lua`](mod/lua/vehicle/extensions/auto/thrashdash_telemetry.lua) | The mod: collects electrics, tyres, damage, states and energy kind, and sends the packets. |
+| [`mod/lua/ge/extensions/thrashdash/trips.lua`](mod/lua/ge/extensions/thrashdash/trips.lua), [`mod/scripts/thrashdash/modScript.lua`](mod/scripts/thrashdash/modScript.lua) | The trip log's game side (BeamNG.Earth): positions, place names, speed limit, weather and events, sent to the relay. The game maps an extension name's `_` to a folder separator, so `thrashdash_trips` must be the file `thrashdash/trips.lua`. |
+| [`relay/thrashdash/triplog.py`](relay/thrashdash/triplog.py) | The trip log: turns the stream of positions into trips on disk (the rules for where one ends are at its top). |
+| [`web/trips.html`](web/trips.html), [`web/js/trips/`](web/js/trips/) | The Trips page: `trips.js` draws it, `model.js` holds the logic Node tests (colours, graph, figures); the map library is in `web/vendor/leaflet/`. |
+| [`relay/thrashdash/tripshare.py`](relay/thrashdash/tripshare.py) | A trip as one html file: joins the Trips page's modules into one script and embeds the data. |
+| [`relay/thrashdash/tripexport.py`](relay/thrashdash/tripexport.py) | A trip as a GPX or KML file. |
+| [`relay/thrashdash/tripstats.py`](relay/thrashdash/tripstats.py) | What a recorded trip adds up to: name, distance, speeds, places, speeding, weather, fuel. |
 | [`relay/thrashdash/hub.py`](relay/thrashdash/hub.py) | Where "what the car is doing now" lives; merges electrics, slow data and trips into channels. |
 | [`relay/thrashdash/udp.py`](relay/thrashdash/udp.py), [`simulator.py`](relay/thrashdash/simulator.py) | Data sources: the real mod, and a simulated drive through the same code path. |
 | [`relay/thrashdash/server.py`](relay/thrashdash/server.py), [`api.py`](relay/thrashdash/api.py) | The web server, WebSocket and REST API, and the request guard. |
@@ -877,13 +947,14 @@ packaging\build-windows.bat
 .venv/bin/python -m unittest discover -s relay/tests -v      # relay (Windows: .venv\Scripts\python)
 node --test tests/js                                         # front-end logic (Node 22+)
 luajit tests/lua/test_telemetry.lua                          # the mod, against fake game objects
+luajit tests/lua/test_trips.lua                              # the trip log's game side, likewise
 .venv/bin/python tools/ui_test.py [--keep-shots DIR]         # drives the real UI in a headless browser
 ```
 
-- The Python tests also run the Lua test when `luajit` is installed.
+- The Python tests also run the two Lua tests when `luajit` is installed.
 - `ui_test.py` needs Chrome, Chromium or Edge. It starts its own relays with a throwaway data folder, so it never touches your layouts or settings, and it exercises the editor, menus, skins, alerts, trips, windows and the phone view with real mouse and keyboard input.
 - The QR code encoder is cross-checked against Python's `qrcode` package (install `requirements-dev.txt`).
-- There is no continuous integration yet; run the four commands before sending changes.
+- There is no continuous integration yet; run these commands before sending changes.
 
 ### Tools
 
@@ -923,7 +994,7 @@ ThrashDash is designed to be safe to leave running on a home computer. In short:
 - **`Host` checking.** The `Host` header must name the relay: loopback names, and, only while network access is on, IP addresses or plain computer names (`my-pc`, `my-pc.local`). A public domain name is always refused, which stops a malicious web page using DNS rebinding to reach the relay through your own browser.
 - **`Origin` checking and write header.** Requests with a foreign `Origin` are refused, and writes must carry `X-ThrashDash`, a header no other website can send (browsers require a preflight that the relay never answers). Bodies are capped at 256 KB.
 - **Safe ids.** Dashboard, window and trip ids match strict patterns, so they can never point outside their folder.
-- **Strict page.** The page ships a strict Content-Security-Policy, loads nothing from the internet and builds its interface without `innerHTML`. Imported dashboards are checked twice (structure by the relay, meaning by the page).
+- **Strict page.** The page ships a strict Content-Security-Policy, loads nothing from the internet (the Trips page, and the live map widget it provides, alone may load map pictures from two named map servers) and builds its interface without `innerHTML`. Imported dashboards are checked twice (structure by the relay, meaning by the page).
 - **The mod** only reads vehicle data and sends UDP to localhost. It never writes files.
 - **Not provided:** https. The PIN and the sign-in cookie cross your network unencrypted, so the PIN keeps casual visitors out but does not protect against someone who can watch the traffic. The PIN is stored in plain text in `auth.json` (so this computer's menu can show it), readable only by your user. ThrashDash does not inspect or change the computer's firewall.
 

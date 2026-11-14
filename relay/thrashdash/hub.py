@@ -7,7 +7,7 @@ path as the real game, so what we test is what ships.
 import json
 import math
 import time
-from collections import Counter
+from collections import Counter, deque
 
 from . import PROTOCOL_VERSION
 from .trip import TripComputer, energy_kind
@@ -22,6 +22,10 @@ MAX_NAME = 200
 # energy the car carries. Each becomes a namespace of channels: tire.FL.temp, damage.zone.RR, state.engine.oilOverheating,
 # energy.electric ...
 SLOW_SECTIONS = ("tire", "damage", "state", "energy")
+
+# Packets from the game-side trip-log extension rather than from a car: where the player is, the place name / speed limit /
+# weather there, and events such as a teleport. They go to the trip log, not to the dashboard's channels.
+GEO_TYPES = ("geo", "geoinfo", "geoevent")
 
 # A source counts as "connected" if a frame arrived within this many seconds. The game sends 30/s,
 # so 2 s of silence reliably means paused-in-menu, car unseated, or game closed.
@@ -65,8 +69,9 @@ def flatten(node, prefix="", out=None, depth=0):
 
 
 class Hub:
-    def __init__(self, simulated=False, trip_path=None):
+    def __init__(self, simulated=False, trip_path=None, triplog=None):
         self.simulated = simulated
+        self.triplog = triplog  # the BeamNG.Earth trip log (triplog.TripLog), or None when this run keeps none
         self.trips = TripComputer(trip_path)  # trip meters A and B (kept across restarts when trip_path is given)
         self._trip = {}  # their current channels (trip.A.distance ...)
         self.vehicle = None
@@ -78,6 +83,8 @@ class Hub:
         self.frame_seq = 0  # bumped on every accepted frame
         self.last_frame_at = None  # time.monotonic() of the last frame
         self.stats = Counter()
+        self.live = deque(maxlen=128)  # the game's live positions (geolive), newest last, for the Trips page's live map
+        self.live_seq = 0
         self._frame_json = (None, "")  # (seq, serialized) cache so N browsers share one json.dumps
 
     # ---- intake -----------------------------------------------------------------------------
@@ -103,6 +110,10 @@ class Hub:
             self._accept_frame(vehicle, flatten(electrics))
         elif kind == "slow":
             self._accept_slow(vehicle, packet)
+        elif kind in GEO_TYPES:
+            self._accept_geo(packet)
+        elif kind == "geolive":
+            self._accept_live(packet)
         elif kind == "catalog":
             # The mod's catalog only lists top-level names. We derive the real (flattened) catalog
             # from frames, so a catalog packet is used only to learn the vehicle quickly.
@@ -110,6 +121,44 @@ class Hub:
             self._set_vehicle(vehicle)
         else:
             self.stats["rejected_type"] += 1
+
+    def _accept_live(self, packet):
+        """A live position (ten a second): handed on to the Trips page as it is, and not recorded (the trip is made from the
+        once-a-second `geo` packets). Only a plausible position is passed on."""
+        lat, lon, rt = packet.get("lat"), packet.get("lon"), packet.get("rt")
+        num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)  # noqa: E731
+        if not (num(lat) and num(lon) and num(rt)) or not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            self.stats["rejected_live"] += 1
+            return
+        self.stats["live"] += 1
+        self.live_seq += 1
+        message = {"type": "geo", "seq": self.live_seq, "rt": float(rt), "lat": float(lat), "lon": float(lon)}
+        if num(packet.get("hdg")):
+            message["hdg"] = float(packet["hdg"]) % 360.0
+        if num(packet.get("spd")) and 0 <= packet["spd"] <= 400:
+            message["spd"] = float(packet["spd"])
+        self.live.append(message)
+
+    def add_trip_event(self, kind, trip_id):
+        """A trip started or ended: told to the Trips page over the same feed as the live positions, so it can open a new trip the
+        moment it begins, even when its window is behind the game (a hidden page's timers are slowed right down, but a message
+        from the relay still arrives at once)."""
+        self.live_seq += 1
+        self.live.append({"type": "trip", "seq": self.live_seq, "event": kind, "id": trip_id})
+
+    def live_since(self, seq):
+        """The live positions newer than number `seq`, oldest first."""
+        return [m for m in self.live if m["seq"] > seq]
+
+    def _accept_geo(self, packet):
+        """A position sample, place/limit/weather snapshot or event from the game's trip-log extension (BeamNG.Earth)."""
+        if self.triplog is None:
+            self.stats["geo_ignored"] += 1
+            return
+        self.stats["geo"] += 1
+        # The car's own numbers (fuel, damage) go into the trip with each position, but only while the car is sending: stale
+        # values from a paused game would be wrong.
+        self.triplog.ingest(packet, self.values if self.connected else {})
 
     def _set_vehicle(self, vehicle):
         if vehicle != self.vehicle:

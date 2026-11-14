@@ -7,9 +7,10 @@ import { SKIN_CHOICES, SKIN_LABELS } from "./skins/themes.js";
 import { confirmDialog, infoDialog } from "./editor/dialog.js";
 import { createSwitcher } from "./switcher.js";
 import { buildPrefs } from "./units.js";
-import { createWindowReporter, ensureWindowId } from "./windowState.js";
-import { openDashboardWindow } from "./windows.js";
+import { createWindowReporter, ensureWindowId, randomWindowId } from "./windowState.js";
+import { openDashboardWindow, tripsUrl } from "./windows.js";
 import { specs } from "./widgets/index.js";
+import { createTripNotice } from "./tripnotice.js";
 
 const canvas = document.getElementById("canvas");
 const widgetsEl = document.getElementById("widgets");
@@ -385,6 +386,7 @@ const switcher = createSwitcher({
   pinned: isPinned,
   follow: unpinAndFollow,
   openWindow: (id) => openDashboardWindow(id, { menu: true }), // the same size as this window, with the menu open to pick what it should show
+  openTrips: openTripsWindow, // the Trips (map) window, which ThrashDash remembers like a dashboard window
   onToggle: (open) => {
     if (open) wakeControls();
   },
@@ -466,6 +468,12 @@ function applyStatus() {
   }
 }
 
+/** Open the Trips (map) window. It has an id like any window, so ThrashDash remembers its size and place with the saved config. */
+function openTripsWindow() {
+  window.open(tripsUrl(randomWindowId()), "_blank", "popup=yes,width=1180,height=760");
+}
+
+const tripNotice = createTripNotice(document.getElementById("trip-notice"));
 let retryMs = 500;
 function connect() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
@@ -486,6 +494,8 @@ function connect() {
       applyStatus();
     } else if (msg.type === "catalog") {
       app.catalog = { vehicle: msg.vehicle, channels: msg.channels || {} };
+    } else if (msg.type === "notice") {
+      tripNotice.show(msg); // a trip has ended (the relay only sends this when the setting is on)
     }
   };
   ws.onclose = () => {

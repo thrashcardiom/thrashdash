@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e13">
+  <title>ThrashDash: Trips</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/css/fonts.css">
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/css/trips.css">
+</head>
+<body data-view="list">
+  <div id="app">
+    <aside id="side">
+      <header class="side-head">
+        <h1>Trips</h1>
+        <span id="count" class="muted"></span>
+        <button id="all" class="btn small" type="button" aria-pressed="false" title="Every trip drawn on one map">All trips</button>
+      </header>
+      <p id="live" class="live" hidden></p>
+      <label class="auto" title="When a new trip starts, open it and show it on the map"><input id="auto-open" type="checkbox" checked> Open new trips automatically</label>
+      <details id="popups" class="popups">
+        <summary>Popups and settings</summary>
+        <label class="idle">End a trip after the car has been parked for
+          <select id="idle-end" aria-label="Minutes parked before a trip ends">
+            <option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="30">30 minutes</option>
+          </select>
+        </label>
+        <fieldset class="pop-group">
+          <legend>Popup messages</legend>
+          <label><input id="pop-game" type="checkbox"> In the game when a trip ends</label>
+          <label><input id="pop-start" type="checkbox"> In the game when a trip starts</label>
+          <label><input id="pop-window" type="checkbox"> On the dashboard windows when a trip ends</label>
+        </fieldset>
+        <button id="pop-test" class="btn small" type="button" title="Sends a popup now to the game and the dashboard windows, whatever is ticked above">Send a test popup</button>
+        <p id="pop-note" class="muted"></p>
+      </details>
+      <ul id="list" class="list"></ul>
+      <p id="empty" class="empty" hidden></p>
+    </aside>
+    <main id="main">
+      <p id="placeholder" class="empty">Pick a trip from the list.</p>
+      <article id="overview" hidden>
+        <header class="head">
+          <button id="ov-back" class="btn back" type="button" aria-label="Back to the list">&larr; Trips</button>
+          <div class="titles">
+            <h2>All trips</h2>
+            <p id="ov-sub" class="muted"></p>
+          </div>
+        </header>
+        <div class="filters" role="group" aria-label="Filter the trips">
+          <label>When <select id="f-when"></select></label>
+          <label>Vehicle <select id="f-vehicle"></select></label>
+          <label>Country <select id="f-country"></select></label>
+        </div>
+        <div class="mapbox">
+          <div id="ovmap" role="img" aria-label="Map of the trips"></div>
+          <div class="base" role="group" aria-label="Map type">
+            <button data-base="street" type="button" aria-pressed="true">Street</button>
+            <button data-base="sat" type="button" aria-pressed="false">Satellite</button>
+          </div>
+        </div>
+        <section id="ov-tiles" class="tiles" aria-label="Totals"></section>
+        <p class="key muted">Click a route to open that trip. The more often a road was driven, the brighter it is.</p>
+      </article>
+      <article id="detail" hidden>
+        <header class="head">
+          <button id="back" class="btn back" type="button" aria-label="Back to the list">&larr; Trips</button>
+          <div class="titles">
+            <h2 id="title"></h2>
+            <p id="subtitle" class="muted"></p>
+          </div>
+          <div class="actions" role="group" aria-label="Save this trip as a file">
+            <a id="export-gpx" class="btn" download title="A GPX track: opens in most GPS and mapping programs">GPX</a>
+            <a id="export-kml" class="btn" download title="A KML track: opens in Google Earth, no account or key needed">KML</a>
+            <a id="export-share" class="btn" download title="One web page with this trip's route, figures and replay that anyone can open, with nothing to install. It contains the trip's positions." hidden>Share</a>
+          </div>
+          <div id="actions" class="actions" hidden>
+            <button id="rename" class="btn" type="button">Rename</button>
+            <button id="delete" class="btn danger" type="button">Delete</button>
+          </div>
+        </header>
+        <div id="mapbox" class="mapbox">
+          <div id="map" role="img" aria-label="Map of the trip"></div>
+          <div class="rot-ui rot-zoom" role="group" aria-label="Zoom">
+            <button id="rot-in" type="button" aria-label="Zoom in">+</button>
+            <button id="rot-out" type="button" aria-label="Zoom out">&minus;</button>
+          </div>
+          <div id="rot-attrib" class="rot-ui rot-attrib"></div>
+          <div class="base" role="group" aria-label="Map type">
+            <button id="base-street" data-base="street" type="button" aria-pressed="true">Street</button>
+            <button id="base-sat" data-base="sat" type="button" aria-pressed="false">Satellite</button>
+          </div>
+          <div id="legend" class="legend" aria-hidden="true"></div>
+        </div>
+        <div id="replay" class="replay" role="group" aria-label="Replay this trip">
+          <button id="play" class="btn play" type="button">Play</button>
+          <button id="golive" class="btn live-btn" type="button" title="Back to the car's position now" hidden>Go live</button>
+          <input id="scrub" type="range" min="0" max="1000" step="1" value="0" aria-label="Position in the trip">
+          <span id="clock" class="clock">0:00:00 / 0:00:00</span>
+          <label class="rate">Speed <select id="rate" aria-label="Replay speed"></select></label>
+          <label class="follow"><input id="follow" type="checkbox" checked> Follow</label>
+          <label class="follow" title="The car stays in the middle pointing up, and the map turns around it"><input id="headup" type="checkbox"> Heading up</label>
+          <span id="readout" class="readout"></span>
+        </div>
+        <section id="tiles" class="tiles" aria-label="Trip figures"></section>
+        <section class="graphbox" aria-label="Speed and altitude">
+          <div id="graph"></div>
+          <div id="tip" class="tip" hidden></div>
+          <p id="graphkey" class="key muted"></p>
+        </section>
+      </article>
+      <p class="share-foot">A trip recorded with ThrashDash and BeamNG.Earth, shared as a single page: the route, figures and replay work without ThrashDash. Map pictures come from the internet (OpenStreetMap, or Sentinel-2 cloudless by EOX), so the map needs a connection; the route and figures do not.</p>
+    </main>
+  </div>
+  <script src="/vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="/js/trips/trips.js"></script>
+</body>
+</html>

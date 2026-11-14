@@ -1,19 +1,29 @@
 """REST endpoints for layouts and settings (everything the editor persists)."""
+import asyncio
 import ipaddress
 
 from aiohttp import web
 
 from .auth import COOKIE_NAME, SESSION_SECONDS, TOKEN_SECONDS, valid_pin
 from .lan import LanController, LanError
+from .paths import web_root
 from .store import LayoutStore, NotFound, ReadOnly, SettingsStore
+from . import tripexport, tripshare
+from .configs import windows_differ
+from .triplog import Busy, NotFound as TripNotFound
 from .validate import ValidationError
 
 LAYOUTS = web.AppKey("layouts", LayoutStore)
 SETTINGS = web.AppKey("settings", SettingsStore)
 LAN_CONTROLLER = web.AppKey("lan_controller", LanController)
 LOCAL_CHECK = web.AppKey("local_check", object)  # remote address -> is this client this computer?
+CONFIGS = web.AppKey("configs", object)  # the ConfigStore (saved sets of windows), or None
+WINDOW_OPENER = web.AppKey("window_opener", dict)  # {"open": async fn(windows) -> int} once windows can be launched, else empty
 WINDOWS = web.AppKey("windows", object)  # the WindowRegistry (which dashboard windows are open)
 AUTH = web.AppKey("auth", object)  # the AuthStore: the PIN for devices on the network
+PAGELOG = web.AppKey("pagelog", object)  # the Trips page's own log lines (a bounded list), kept so a problem on a real screen can be read afterwards
+NOTICES = web.AppKey("notices", object)  # trip popups (tripnotice.TripNotices), or None
+TRIPLOG = web.AppKey("triplog", object)  # the TripLog (where the car has been), or None when this run keeps none
 HUB = web.AppKey("hub", object)  # the Hub (live data and the trip meters); defined here so both modules share one key
 
 # Browsers refuse to attach a custom header to a cross-origin request without a CORS preflight, and
@@ -129,6 +139,9 @@ async def put_settings(request):
         except LanError as e:
             request.app[SETTINGS].update({"lan": False})  # never leave a setting on that could not be honoured
             return _error(409, str(e))
+    log = request.app[TRIPLOG]
+    if log is not None:
+        log.set_idle_end(settings["tripIdleEndMin"] * 60)  # (at once, for the trip being driven too)
     return web.json_response(request.app[SETTINGS].get())
 
 
@@ -238,6 +251,201 @@ async def reset_trip(request):
     return web.json_response({"ok": True})
 
 
+async def list_triplog(request):
+    """Every recorded trip (newest first) and whether one is being recorded now."""
+    log = request.app[TRIPLOG]
+    if log is None:
+        return web.json_response({"enabled": False, "status": {"recording": False}, "trips": []})
+    notices = request.app[NOTICES]
+    return web.json_response({"enabled": True, "status": log.status(), "trips": log.list(), "notices": dict(notices.stats) if notices is not None else {}})
+
+
+async def test_popup(request):
+    """Send a popup now (to the game and the dashboard windows), whatever the settings say, to see which ways work."""
+    notices = request.app[NOTICES]
+    if notices is None:
+        return _error(404, "popups are not available in this run")
+    return web.json_response({"ok": True, **notices.test()})
+
+
+def _configs(request):
+    store = request.app[CONFIGS]
+    if store is None:
+        raise web.HTTPNotFound(text="saved configs are not available in this run")
+    return store
+
+
+def _configs_state(request):
+    """Everything the Dashboards menu shows about configs: which one is loaded, whether the windows have changed since it was saved,
+    and a summary of each (so it can say what it holds)."""
+    data = _configs(request).get()
+    live = request.app[WINDOWS].live_entries()
+    active = next((c for c in data["configs"] if c["id"] == data["active"]), None)
+    summary = lambda ws: [{"kind": e.get("kind", "dashboard"), "dashboard": e.get("dashboard"), "width": e.get("width"), "height": e.get("height")} for e in ws.values()]  # noqa: E731
+    return {"active": data["active"], "open": len(live), "changed": bool(active) and windows_differ(active["windows"], live),
+            "configs": [{"id": c["id"], "name": c["name"], "windows": summary(c["windows"])} for c in data["configs"]]}
+
+
+async def list_configs(request):
+    return web.json_response(_configs_state(request))
+
+
+async def create_config(request):
+    """Save as: {name} makes a new config of the windows open now, which becomes the active one."""
+    body = await _body(request)
+    if not isinstance(body, dict):
+        return _error(400, "body must be an object")
+    try:
+        _configs(request).create(body.get("name"), request.app[WINDOWS].live_entries())
+    except ValidationError as e:
+        return _error(400, str(e))
+    return web.json_response({"ok": True, **_configs_state(request)})
+
+
+async def save_config(request):
+    """Save: overwrite a config with the windows open now. `PUT /api/configs/active` with {id} picks the config ThrashDash opens with
+    and opens its windows that are not open yet."""
+    body = await _body(request)
+    if not isinstance(body, dict):
+        return _error(400, "body must be an object")
+    store = _configs(request)
+    config_id = request.match_info["id"]
+    opened = 0
+    try:
+        if config_id == "active":
+            chosen = body.get("id")
+            store.activate(chosen)
+            windows = store.active_windows() if chosen is not None else None
+            opener = request.app[WINDOW_OPENER].get("open")
+            if windows and opener is not None:
+                opened = await opener(windows)
+        else:
+            store.save(config_id, request.app[WINDOWS].live_entries())
+    except ValidationError as e:
+        return _error(400, str(e))
+    except NotFound:
+        return _error(404, "there is no such config")
+    return web.json_response({"ok": True, "opened": opened, **_configs_state(request)})
+
+
+async def delete_config(request):
+    try:
+        _configs(request).delete(request.match_info["id"])
+    except NotFound:
+        return _error(404, "there is no such config")
+    return web.json_response({"ok": True, **_configs_state(request)})
+
+
+MAX_PAGELOG_LINES = 400
+MAX_PAGELOG_LINE = 300
+
+
+async def post_pagelog(request):
+    """The Trips page reports what it is doing (a new trip seen, what it decided, an error), a few lines at a time."""
+    body = await _body(request)
+    lines = body.get("lines") if isinstance(body, dict) else None
+    if not isinstance(lines, list) or len(lines) > 50:
+        return _error(400, "lines: a list of at most 50 lines of text")
+    log = request.app[PAGELOG]
+    for line in lines:
+        if isinstance(line, str):
+            log.append(line[:MAX_PAGELOG_LINE])
+    return web.json_response({"ok": True})
+
+
+async def get_pagelog(request):
+    return web.json_response({"lines": list(request.app[PAGELOG])})
+
+
+async def get_triplog_routes(request):
+    """Every trip's thinned route for the all-trips map. Worked out off the main loop: reading many trip files must not
+    hold up the live telemetry."""
+    log = request.app[TRIPLOG]
+    routes = await asyncio.to_thread(log.routes) if log is not None else []
+    return web.json_response({"enabled": log is not None, "trips": routes})
+
+
+async def get_triplog_trip(request):
+    log = request.app[TRIPLOG]
+    trip = log.detail(request.match_info["id"]) if log is not None else None
+    if trip is None:
+        return _error(404, "there is no such trip")
+    return web.json_response(trip)
+
+
+EXPORTS = {"gpx": ("application/gpx+xml", tripexport.to_gpx, "gpx"), "kml": ("application/vnd.google-earth.kml+xml", tripexport.to_kml, "kml")}
+
+
+async def live_triplog_trip(request):
+    """What a trip has gained since `after` (seconds into it), for following a trip being driven."""
+    log = request.app[TRIPLOG]
+    try:
+        after = float(request.query.get("after", "-1"))
+    except ValueError:
+        return _error(400, "after must be a number")
+    update = await asyncio.to_thread(log.live, request.match_info["id"], after) if log is not None else None
+    if update is None:
+        return _error(404, "there is no such trip")
+    return web.json_response(update)
+
+
+async def share_triplog_trip(request):
+    """A finished trip as one html file anyone can open (tripshare.py). It holds the trip's positions, so it is only made on request."""
+    log = request.app[TRIPLOG]
+    trip = log.detail(request.match_info["id"]) if log is not None else None
+    if trip is None:
+        return _error(404, "there is no such trip")
+    if not trip.get("end"):
+        return _error(409, "this trip is still being recorded: share it once it has ended")
+    page = tripshare.build_share_page(trip, request.app[SETTINGS].get()["units"], web_root())
+    name = tripexport.file_name(trip, trip.get("stats"), "html")
+    return web.Response(text=page, content_type="text/html", charset="utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+async def export_triplog_trip(request):
+    """A trip as a GPX or KML file to download (read-only, so a phone may do it too)."""
+    log = request.app[TRIPLOG]
+    kind = request.match_info["kind"]
+    trip = log.detail(request.match_info["id"]) if log is not None and kind in EXPORTS else None
+    if trip is None:
+        return _error(404, "there is no such trip")
+    content_type, build, extension = EXPORTS[kind]
+    body = build(trip, trip.get("stats"))
+    name = tripexport.file_name(trip, trip.get("stats"), extension)
+    return web.Response(text=body, content_type=content_type, charset="utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+async def rename_triplog_trip(request):
+    """Give an ended trip a name: {"name": "..."} (an empty name takes it away)."""
+    log = request.app[TRIPLOG]
+    body = await _body(request)
+    if log is None or not isinstance(body, dict):
+        return _error(404, "there is no such trip")
+    try:
+        title = log.rename(request.match_info["id"], body.get("name"))
+    except TripNotFound:
+        return _error(404, "there is no such trip")
+    except Busy:
+        return _error(409, "this trip is still being recorded")
+    except ValueError as e:
+        return _error(400, str(e))
+    return web.json_response({"ok": True, "title": title})
+
+
+async def delete_triplog_trip(request):
+    """Move an ended trip to the trash folder."""
+    log = request.app[TRIPLOG]
+    try:
+        if log is None:
+            raise TripNotFound
+        log.delete(request.match_info["id"])
+    except TripNotFound:
+        return _error(404, "there is no such trip")
+    except Busy:
+        return _error(409, "this trip is still being recorded")
+    return web.json_response({"ok": True})
+
+
 def add_routes(app):
     r = app.router
     r.add_get("/api/layouts", list_layouts)
@@ -246,6 +454,21 @@ def add_routes(app):
     r.add_put("/api/layouts/{id}", save_layout)
     r.add_delete("/api/layouts/{id}", delete_layout)
     r.add_post("/api/trips/{name}/reset", reset_trip)
+    r.add_get("/api/triplog", list_triplog)
+    r.add_get("/api/pagelog", get_pagelog)
+    r.add_post("/api/pagelog", post_pagelog)
+    r.add_get("/api/configs", list_configs)
+    r.add_post("/api/configs", create_config)
+    r.add_put("/api/configs/{id}", save_config)
+    r.add_delete("/api/configs/{id}", delete_config)
+    r.add_post("/api/triplog/test-popup", test_popup)
+    r.add_get("/api/triplog/routes", get_triplog_routes)  # (before {id}: first match wins)
+    r.add_get("/api/triplog/{id}", get_triplog_trip)
+    r.add_get("/api/triplog/{id}/share", share_triplog_trip)
+    r.add_get("/api/triplog/{id}/live", live_triplog_trip)  # (before {kind}: first match wins)
+    r.add_get("/api/triplog/{id}/{kind}", export_triplog_trip)
+    r.add_patch("/api/triplog/{id}", rename_triplog_trip)
+    r.add_delete("/api/triplog/{id}", delete_triplog_trip)
     r.add_get("/api/windows", get_windows)
     r.add_put("/api/windows/{id}", put_window)
     r.add_delete("/api/windows/{id}", delete_window)

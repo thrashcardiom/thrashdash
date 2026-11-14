@@ -15,6 +15,11 @@ class ModLuaTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertIn("0 failed", done.stdout)
 
+    def test_trip_log_extension_against_fake_game_objects(self):
+        done = subprocess.run([LUAJIT, "tests/lua/test_trips.lua"], cwd=ROOT, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("0 failed", done.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

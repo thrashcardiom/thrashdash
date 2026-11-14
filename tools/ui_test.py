@@ -1389,10 +1389,433 @@ async def scenarios(b, shots):
     await b.eval("document.getElementById('pv-toggle').click()")
     await p.shot("skin-preview")
 
+    await trips_scenario(b, p)
+
     print("\n== console health")
     bad = [m for m in b.console if m[0] == "error" and "favicon" not in m[1]]
     check("no console errors", not bad, str(bad[:3]))
     check("no uncaught exceptions", not b.errors, str(b.errors[:2]))
+
+
+def _seed_trip(folder, tid, ts, lat0, lon0, speeding):
+    """Write a finished trip file by hand (a 90 second drive north, a point every 3 s), so the Trips page has something to show."""
+    rows = [{"k": "trip", "fmt": 1, "id": tid, "ts": ts, "vehicle": "etkc", "veh": 1, "energy": "liquid"}]
+    for n in range(31):
+        rows.append({"k": "p", "t": n * 3.0, "la": round(lat0 + n * 0.0003, 7), "lo": lon0, "al": 5 + n * 0.5, "s": 15.0 + (n % 5), "h": 90.0 if n >= 15 else 0.0,
+                     "d": n * 48.0, "f": 0.9 - n * 0.001, "fv": round(45.0 - n * 0.05, 3), "dm": 0})
+        if n % 3 == 0:
+            rows.append({"k": "i", "t": n * 3.0, "place": {"street": "Oriental Parade", "place": "Wellington", "country": "New Zealand"},
+                         "lim": {"ms": 11.11 if speeding else 30.0, "m": True, "u": "kmh"}, "wx": {"tempC": 15.0, "windMs": 4.0}})
+    rows.append({"k": "end", "reason": "idle", "t": 90.0, "ts": ts + 90, "dist": 1440.0, "top": 19.0, "n": 31})
+    (folder / f"{tid}.jsonl").write_text("\n".join(json.dumps(r, separators=(",", ":")) for r in rows) + "\n")
+
+
+async def trips_scenario(b, p):
+    """The Trips page, against a relay that has two recorded trips (the normal test relay runs in --simulate mode, which keeps none)."""
+    print("\n== trips page")
+    data = Path(tempfile.mkdtemp(prefix="thrashdash-uitest-trips-"))
+    folder = data / "thrashdash" / "triplog"
+    folder.mkdir(parents=True)
+    _seed_trip(folder, "20261113T210639Z", 1794604000, -41.29, 174.78, speeding=True)
+    _seed_trip(folder, "20261113T200000Z", 1763000000, -41.30, 174.77, speeding=False)  # (a year older, for the date filter)
+    port, udp = PORT + 40, 24568
+    base = f"http://127.0.0.1:{port}"
+    env = {**ENV, "XDG_DATA_HOME": str(data), "LOCALAPPDATA": str(data)}
+    try:
+        urllib.request.urlopen(base + "/api/status", timeout=1)
+        raise RuntimeError(f"something is already answering on port {port}: a relay from an earlier test run is still alive (kill it)")
+    except urllib.error.URLError:
+        pass  # (nothing there: good)
+    relay = subprocess.Popen([sys.executable, str(ROOT / "relay" / "run.py"), "--no-window", "--http-port", str(port), "--udp-port", str(udp)],
+                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        for _ in range(60):
+            try:
+                urllib.request.urlopen(base + "/api/status", timeout=1)
+                break
+            except OSError:
+                time.sleep(0.2)
+        mark = len(b.console)
+        await b.goto(BASE + "/", wait=1.5)
+        await b.eval("document.getElementById('dash-button').click()")
+        await p.settle(0.5)
+        check("the Dashboards menu has a way to open the trip log", "Open the trip log" in await b.eval("document.getElementById('dash-menu').textContent"))
+        await b.resize(1280, 900)
+        await b.goto(base + "/trips#20261113T210639Z", wait=2.5)
+        ids = await b.eval("[...document.querySelectorAll('#list .item')].map(e => e.dataset.id)")
+        check("the list shows both trips, newest first", ids == ["20261113T210639Z", "20261113T200000Z"], str(ids))
+        check("the trip in the address is open", await b.eval("document.getElementById('detail').hidden") is False and await b.eval("document.querySelector('.item[aria-current=true]')?.dataset.id") == "20261113T210639Z")
+        check("it is named from where it began and ended", "Around Oriental Parade" in await p.text("#title"), await p.text("#title"))
+        check("map tile requests carry the page's origin as Referer (OpenStreetMap blocks tiles without one)", await b.eval("document.querySelector('#map .leaflet-tile')?.referrerPolicy") == "origin")
+        check("the map is drawn with its tiles and a route", await p.count("#map .leaflet-tile") > 0 and await p.count("#map canvas") >= 1)
+        check("the figures are shown", await p.count("#tiles .tile") >= 6)
+        check("it shows time over the limit, because the limit was posted", "Over the limit" in await b.eval("document.getElementById('tiles').textContent") and await p.count("#tiles .tile.warn") == 1)
+        check("the speed graph is drawn", len(await b.eval("document.querySelector('#graph svg path.speed')?.getAttribute('d') ?? ''")) > 20)
+        check("and shows the posted limit and where it was passed", await p.count("#graph svg line.limit") >= 1 and await p.count("#graph svg rect.over") >= 1)
+        await p.shot("trips")
+        check("GPX and KML links are there for the open trip", await b.eval("document.getElementById('export-gpx').getAttribute('href')") == "/api/triplog/20261113T210639Z/gpx" and await b.eval("document.getElementById('export-kml').getAttribute('href')") == "/api/triplog/20261113T210639Z/kml" and await b.eval("document.getElementById('export-gpx').hasAttribute('download')"))
+        parsed = await b.eval("fetch(document.getElementById('export-gpx').href).then(r => r.text()).then(t => { const d = new DOMParser().parseFromString(t, 'application/xml'); return [d.querySelector('parsererror') === null, d.getElementsByTagName('trkpt').length]; })")
+        check("the GPX file the link gives is well formed and holds the whole track", parsed[0] is True and parsed[1] >= 30, str(parsed))
+        parsed = await b.eval("fetch(document.getElementById('export-kml').href).then(r => r.text()).then(t => { const d = new DOMParser().parseFromString(t, 'application/xml'); return [d.querySelector('parsererror') === null, d.getElementsByTagName('LineString')[0]?.getElementsByTagName('coordinates')[0]?.textContent.trim().split(/\\s+/).length ?? 0]; })")
+        check("and so is the KML", parsed[0] is True and parsed[1] >= 30, str(parsed))
+
+        await b.eval("document.getElementById('graph').scrollIntoView({block: 'center'})")
+        await p.settle(0.2)
+        r = await b.rect("#graph svg")
+        await b.move(r["cx"], r["cy"])
+        await p.settle(0.3)
+        check("hovering the graph shows the figures at that point", await b.eval("!document.getElementById('tip').hidden") and "km/h" in await p.text("#tip"), await p.text("#tip"))
+
+        check("the replay is ready but shows no car yet", await p.count(".car") == 0 and await b.eval("document.getElementById('play').textContent") == "Play" and not await b.eval("document.getElementById('play').disabled"))
+        await b.eval("document.getElementById('rate').value = '64'; document.getElementById('rate').dispatchEvent(new Event('change'))")
+        await b.eval("document.getElementById('play').click()")
+        await p.settle(0.5)
+        check("Play puts a car on the map and says what it is doing", await p.count(".car") == 1 and "km/h" in await p.text("#readout"), await p.text("#readout"))
+        check("the replay marks its place on the graph", await b.eval("document.querySelector('#graph .replay-rule')?.getAttribute('visibility')") == "visible")
+        check("the clock and slider move", await b.eval("document.getElementById('scrub').value") != "0" and not (await p.text("#clock")).startswith("0:00:00 /"), await p.text("#clock"))
+        await p.settle(2.5)
+        check("at the end it stops and offers to go again", await b.eval("document.getElementById('play').textContent") == "Replay", await b.eval("document.getElementById('play').textContent"))
+        await b.eval("document.getElementById('scrub').value = '500'; document.getElementById('scrub').dispatchEvent(new Event('input'))")
+        await p.settle(0.2)
+        check("dragging the slider goes to that point in the trip", (await p.text("#clock")).startswith("0:00:45 /"), await p.text("#clock"))
+        await b.eval("document.getElementById('rate').value = '1'; document.getElementById('rate').dispatchEvent(new Event('change'))")
+        await b.key(" ")
+        await p.settle(0.3)
+        check("the space bar plays and pauses", await b.eval("document.getElementById('play').textContent") == "Pause")
+        await b.key(" ")
+        await p.settle(0.2)
+        check("and pauses again", await b.eval("document.getElementById('play').textContent") in ("Play", "Replay"))
+        await b.eval("document.getElementById('graph').scrollIntoView({block: 'start'}); window.scrollTo(0, 0); document.getElementById('main').scrollTop = 0")
+        await b.eval("document.getElementById('scrub').value = '800'; document.getElementById('scrub').dispatchEvent(new Event('input'))")
+        await p.settle(0.3)
+        await b.eval("document.getElementById('headup').click()")
+        await p.settle(0.8)
+        mid = await b.eval("(() => { const m = document.getElementById('mapbox'), r = m.getBoundingClientRect(), c = document.querySelector('.car')?.getBoundingClientRect(); return {on: m.classList.contains('rotating'), rot: m.style.getPropertyValue('--rot'), big: document.getElementById('map').getBoundingClientRect().width > r.width * 1.2 || document.getElementById('map').offsetWidth > m.offsetWidth, dx: c ? Math.abs((c.left + c.width / 2) - (r.left + r.width / 2)) : 999, dy: c ? Math.abs((c.top + c.height / 2) - (r.top + r.height / 2)) : 999, zoom: null}; })()")
+        check("Heading up turns the map about the car, so it points up", mid["on"] and mid["rot"] == "-90deg" and mid["big"], str(mid))
+        check("and keeps the car in the middle of the map", mid["dx"] < 6 and mid["dy"] < 6, str(mid))
+        check("the page draws the zoom buttons and the credit then", await b.eval("getComputedStyle(document.getElementById('rot-in').parentElement).display") == "flex" and "OpenStreetMap" in await p.text("#rot-attrib"))
+        net = await b.eval("(() => { let m = new DOMMatrix(); for (let e = document.querySelector('.car span'); e && e.id !== 'mapbox'; e = e.parentElement) { const t = getComputedStyle(e).transform; if (t && t !== 'none') m = new DOMMatrix(t).multiply(m); } return Math.round(Math.atan2(m.b, m.a) * 1800 / Math.PI) / 10; })()")
+        check("the car's tip points straight up on the screen (its own turn and the map's cancel)", abs(net) < 2.0 or abs(abs(net) - 360) < 2.0, f"net rotation {net} degrees")
+        await b.eval("document.getElementById('rot-in').click()")
+        await p.settle(0.3)
+        await b.eval("document.getElementById('scrub').value = '100'; document.getElementById('scrub').dispatchEvent(new Event('input'))")
+        await p.settle(0.3)
+        check("the map turns back as the heading does", await b.eval("document.getElementById('mapbox').style.getPropertyValue('--rot')") == "0deg", await b.eval("document.getElementById('mapbox').style.getPropertyValue('--rot')"))
+        await b.eval("document.getElementById('headup').click()")
+        await p.settle(0.6)
+        check("switching it off puts the map back upright and the right size", await b.eval("!document.getElementById('mapbox').classList.contains('rotating') && document.getElementById('mapbox').style.height === ''") and await b.eval("getComputedStyle(document.getElementById('rot-in').parentElement).display") == "none")
+        await b.eval("document.querySelectorAll('#list .item')[1].click()")
+        await p.settle(1.0)
+        check("opening another trip clears the replay", await p.count(".car") == 0 and await p.text("#readout") == "")
+        await b.eval("document.querySelectorAll('#list .item')[0].click()")
+        await p.settle(1.0)
+        await b.eval("document.getElementById('base-sat').click()")
+        await p.settle(0.5)
+        check("the satellite button switches the map and is remembered", await b.eval("document.getElementById('base-sat').getAttribute('aria-pressed')") == "true" and await b.eval("localStorage.getItem('thrashdash.trips.base')") == "sat")
+        check("the satellite credit is shown", "Sentinel-2" in await p.text(".leaflet-control-attribution"))
+        await b.eval("document.getElementById('base-street').click()")
+
+        await b.eval("document.getElementById('all').click()")
+        await p.settle(1.5)
+        check("All trips shows a map of every route, with totals", await b.eval("document.getElementById('overview').hidden") is False and await b.eval("document.getElementById('detail').hidden") is True and await p.count("#ov-tiles .tile") == 5)
+        check("it says how many trips", "2 trips" in await p.text("#ov-sub"), await p.text("#ov-sub"))
+        check("the trips are drawn on the map", await b.eval("document.querySelectorAll('#ovmap canvas').length") >= 1 and await p.count("#ovmap .leaflet-tile") > 0)
+        check("the filters offer the vehicle and country that occur", await b.eval("[...document.getElementById('f-vehicle').options].map(o => o.value).join('|')") == "|etkc" and await b.eval("[...document.getElementById('f-country').options].map(o => o.value).join('|')") == "|New Zealand")
+        await b.eval("document.getElementById('f-when').value = '7'; document.getElementById('f-when').dispatchEvent(new Event('change'))")
+        await p.settle(0.3)
+        check("the date filter keeps only the recent trip and the totals follow", "1 of 2 trips" in await p.text("#ov-sub") and await p.text("#ov-tiles .tile .tile-value") == "1", await p.text("#ov-sub"))
+        await b.eval("document.getElementById('f-when').value = 'year'; document.getElementById('f-when').dispatchEvent(new Event('change'))")
+        await p.settle(0.3)
+        check("this year leaves out the older one too", "1 of 2 trips" in await p.text("#ov-sub"), await p.text("#ov-sub"))
+        await b.eval("document.getElementById('f-when').value = 'all'; document.getElementById('f-when').dispatchEvent(new Event('change'))")
+        await p.settle(0.3)
+        check("and clearing it brings them back", "2 trips" in await p.text("#ov-sub"))
+        check("the address records the view", await b.eval("location.hash") == "#all")
+        await b.eval("document.querySelector('#overview .base button[data-base=sat]').click()")
+        await p.settle(0.4)
+        check("the map type button works here too and both maps share the choice", await b.eval("document.getElementById('base-sat').getAttribute('aria-pressed')") == "true")
+        await b.eval("document.querySelector('#overview .base button[data-base=street]').click()")
+        await p.shot("trips-all")
+        await b.eval("document.querySelector('#list .item').click()")
+        await p.settle(1.0)
+        check("picking a trip from the list leaves the overview", await b.eval("document.getElementById('overview').hidden") is True and await b.eval("document.getElementById('detail').hidden") is False)
+
+        await b.eval("document.getElementById('rename').click()")
+        await p.settle(0.2)
+        check("Rename turns the title into a box", await p.count("#title input.rename-input") == 1)
+        await b.type_text("Sunday <b>run</b>")
+        await b.key("Enter")
+        await p.settle(0.8)
+        check("the new name is shown as plain text and is kept", await p.text("#title") == "Sunday <b>run</b>" and await p.count("#title b") == 0, await p.text("#title"))
+        check("it is in the list too", "Sunday <b>run</b>" in await p.text("#list .item"))
+        check("and was stored with the trip", any(json.loads(line).get("name") == "Sunday <b>run</b>" for line in (folder / "20261113T210639Z.jsonl").read_text().splitlines() if '"name"' in line))
+
+        await b.resize(390, 844)
+        await b.goto(base + "/trips", wait=2.0)
+        check("on a phone-size screen the list comes first, with no trip open", await b.eval("document.body.dataset.view") == "list" and await b.eval("getComputedStyle(document.getElementById('main')).display") == "none")
+        await b.eval("document.querySelector('#list .item').click()")
+        await p.settle(1.2)
+        check("picking a trip shows it, with a way back", await b.eval("document.body.dataset.view") == "detail" and await b.eval("getComputedStyle(document.getElementById('back')).display") != "none")
+        await p.shot("trips-phone")
+        await b.eval("document.getElementById('back').click()")
+        check("Back returns to the list", await b.eval("document.body.dataset.view") == "list")
+        await b.resize(1280, 900)
+
+        await b.goto(base + "/trips#20261113T200000Z", wait=2.0)
+        await b.eval("document.getElementById('delete').click()")
+        check("Delete asks again first", "Really" in await p.text("#delete") and await p.count("#list .item") == 2)
+        await b.eval("document.getElementById('delete').click()")
+        await p.settle(0.8)
+        check("then moves the trip to the trash", await p.count("#list .item") == 1 and (folder / "trash" / "20261113T200000Z.jsonl").is_file() and not (folder / "20261113T200000Z.jsonl").exists())
+        check("and the page shows nothing selected", await b.eval("document.getElementById('detail').hidden"))
+
+
+        print("\n== window config (the map window is saved with the dashboards)")
+
+        def call(method, path, body=None):
+            request = urllib.request.Request(base + path, method=method, data=None if body is None else json.dumps(body).encode(), headers={"X-ThrashDash": "1", "Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=5) as r:
+                return json.load(r)
+
+        MAPWIN = "mapwin123456"
+        call("PUT", f"/api/windows/{MAPWIN}", {"kind": "trips", "width": 1180, "height": 760, "x": 1300, "y": 40, "stamp": 1000})  # (a map window, as the Trips page reports itself)
+        await b.resize(1200, 700)
+        await b.goto(base + "/", wait=2.0)
+        await b.eval("document.getElementById('dash-button').click()")
+        await p.settle(0.8)
+        check("the Dashboards menu has a Window config section with nothing saved yet", "Window config" in await b.eval("document.getElementById('dash-menu').textContent") and "Nothing saved yet" in await b.eval("document.getElementById('dash-menu').textContent"))
+        await b.eval("[...document.querySelectorAll('.dm-config-actions .dm-action')].find(x => x.textContent.startsWith('Save as')).click()")
+        await p.settle(0.5)
+        check("Save as asks for a name", await b.eval("!!document.querySelector('.dm-config-input')"))
+        await b.eval("document.querySelector('.dm-config-input').value = 'Driving'; document.querySelector('.dm-config-name').requestSubmit()")
+        await p.settle(1.0)
+        got = call("GET", "/api/configs")
+        kinds = sorted({x["kind"] for x in got["configs"][0]["windows"]}) if got["configs"] else []
+        check("it saves the open windows, the map window among them, and that config becomes the one that opens", len(got["configs"]) == 1 and got["active"] == got["configs"][0]["id"] and kinds == ["dashboard", "trips"] and got["changed"] is False, str(got))
+        saved_map = [x for x in got["configs"][0]["windows"] if x["kind"] == "trips"]
+        check("with the map window's size", saved_map and saved_map[0]["width"] == 1180 and saved_map[0]["height"] == 760, str(saved_map))
+
+        call("PUT", f"/api/windows/{MAPWIN}", {"kind": "trips", "width": 900, "height": 600, "x": 1300, "y": 40, "stamp": 2000})  # the map window was resized
+        await b.eval("document.getElementById('dash-button').click(); document.getElementById('dash-button').click()")
+        await p.settle(1.5)
+        text = await b.eval("document.getElementById('dash-menu').textContent")
+        check("the menu says the windows changed since the save, and what Save will overwrite", "Windows changed since saved" in text and "Driving" in text, text[-400:])
+        await b.eval("[...document.querySelectorAll('.dm-config-actions .dm-action')].find(x => x.textContent === 'Save').click()")
+        await p.settle(1.0)
+        got = call("GET", "/api/configs")
+        resized = [x for x in got["configs"][0]["windows"] if x["kind"] == "trips"]
+        check("Save overwrites the loaded config and makes no copy", len(got["configs"]) == 1 and resized and resized[0]["width"] == 900, str(got))
+
+        await b.eval("[...document.querySelectorAll('.dm-config-actions .dm-action')].find(x => x.textContent.startsWith('Save as')).click()")
+        await p.settle(0.5)
+        await b.eval("document.querySelector('.dm-config-input').value = 'Review'; document.querySelector('.dm-config-name').requestSubmit()")
+        await p.settle(1.0)
+        got = call("GET", "/api/configs")
+        check("Save as keeps the first and adds a second, which now opens", [c["name"] for c in got["configs"]] == ["Driving", "Review"] and got["active"] == got["configs"][1]["id"], str(got))
+        await b.eval("(() => { const s = document.querySelector('.dm-config-pick'); s.value = s.options[1].value; s.dispatchEvent(new Event('change')); })()")
+        await p.settle(1.0)
+        check("picking one makes it the one that opens next time", call("GET", "/api/configs")["active"] == got["configs"][0]["id"])
+
+        await b.goto(base + "/trips", wait=2.5)
+        windows = call("GET", "/api/windows")["windows"]
+        trips_id = await b.eval("new URLSearchParams(location.search).get('w')")
+        check("the Trips (map) window reports itself like a dashboard window, with its own id in its address", bool(trips_id) and windows.get(trips_id, {}).get("kind") == "trips" and (windows[trips_id].get("width") or 0) > 300, str(windows.get(trips_id)))
+        await b.eval("document.querySelector('.popups').open = true")
+        check("the popup checkboxes are labelled as popup messages", "Popup messages" in await b.eval("document.querySelector('.pop-group legend').textContent") and await b.eval("document.querySelectorAll('.pop-group input[type=checkbox]').length") == 3)
+
+        print("\n== a shared trip (one html file, opened from disk)")
+        shared = data / "shared-trip.html"
+        shared.write_bytes(urllib.request.urlopen(base + "/api/triplog/20261113T210639Z/share", timeout=10).read())
+        mark2 = len(b.console)
+        await b.resize(1280, 900)
+        await b.goto(shared.as_uri(), wait=3.0)
+        await p.shot("shared")
+        check("the shared file shows the trip with no list or controls for changing it", await b.eval("document.body.classList.contains('static') && getComputedStyle(document.getElementById('side')).display === 'none' && getComputedStyle(document.querySelector('.actions')).display === 'none'"))
+        check("it has the trip's name (the one it was given, as plain text) and figures", await p.text("#title") == "Sunday <b>run</b>" and await p.count("#title b") == 0 and await p.count("#tiles .tile") >= 6, await p.text("#title"))
+        check("the map is there (a file opened from disk starts on the satellite picture: OpenStreetMap needs a Referer)", await p.count("#map .leaflet-container, #map.leaflet-container") >= 1 and await b.eval("document.getElementById('base-sat').getAttribute('aria-pressed')") == "true")
+        check("the route and the graph are drawn", await b.eval("document.querySelectorAll('#map canvas').length") >= 1 and len(await b.eval("document.querySelector('#graph svg path.speed')?.getAttribute('d') ?? ''")) > 20)
+        await b.eval("document.getElementById('rate').value = '64'; document.getElementById('rate').dispatchEvent(new Event('change')); document.getElementById('play').click()")
+        await p.settle(0.6)
+        check("the replay works in the shared file", await p.count(".car") == 1 and "km/h" in await p.text("#readout"), await p.text("#readout"))
+        check("the file's own policy let its scripts and styles run", not [m for m in b.console[mark2:] if "Content Security Policy" in m[1] or "Refused to" in m[1]], str([m for m in b.console[mark2:] if "Refused" in m[1]][:2]))
+        check("and nothing went wrong in it", not b.errors, str(b.errors[:2]))
+        await b.goto("about:blank", wait=0.2)
+        b.errors.clear()
+        await b.goto(base + "/trips#20261113T210639Z", wait=2.0)
+
+        print("\n== trip popups")
+        import socket as _socket
+        game = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)  # stands in for the game's trip-log extension
+        game.bind(("127.0.0.1", 0))
+        game.settimeout(3)
+
+        def send(packet):
+            game.sendto(json.dumps({"v": 1, **packet}).encode(), ("127.0.0.1", udp))
+
+        try:
+            await b.resize(1200, 420)
+            await b.goto(base + "/", wait=1.5)  # a dashboard window, open while the trip is driven
+            for i in range(40):  # 40 s at 15 m/s, heading north
+                send({"type": "geo", "rt": float(i), "ts": 1794700000 + i, "lat": -41.2 + i * 0.000135, "lon": 174.8, "alt": 5.0, "spd": 15.0, "hdg": 0.0, "ready": True, "veh": 1, "model": "etkc"})
+                if i % 3 == 0:
+                    send({"type": "geoinfo", "rt": float(i), "limit": {"ms": 30.0, "mapped": True, "unit": "kmh"}, "place": {"street": "Popup Street", "country": "New Zealand"}})
+            send({"type": "geoevent", "name": "levelEnd", "rt": 41.0, "ts": 1794700041})
+            await p.settle(2.0)
+            shown = await b.eval("(() => { const e = document.getElementById('trip-notice'); return [e.hidden, e.textContent]; })()")
+            check("a dashboard window shows a banner when the trip ends", shown[0] is False and "Trip finished" in shown[1] and "Popup Street" in shown[1], str(shown))
+            check("it says how far and how long", "km" in shown[1] and " s" in shown[1], shown[1])
+            toast = None
+            try:
+                while True:
+                    data, source = game.recvfrom(65535)
+                    packet = json.loads(data)
+                    if packet.get("type") == "toast":
+                        toast = (packet, source)
+                        break
+            except OSError:
+                pass
+            check("the game is sent the same message, from the relay's own address", toast is not None and toast[0]["title"] == "Trip finished" and toast[1] == ("127.0.0.1", udp), str(toast))
+            await b.eval("document.getElementById('trip-notice').click()")
+            check("clicking the banner puts it away", await b.eval("document.getElementById('trip-notice').hidden") is True)
+
+            await b.resize(1280, 900)
+            await b.goto(base + "/trips", wait=2.0)
+            states = await b.eval("['pop-game', 'pop-start', 'pop-window'].map(id => document.getElementById(id).checked)")
+            check("the Trips page shows which popups are on (end and banner on, start off, by default)", states == [True, False, True], str(states))
+            check("the Trips page offers how long a parked car waits before the trip ends, two minutes by default", await b.eval("document.getElementById('idle-end').value") == "2")
+            await b.eval("document.getElementById('popups').open = true; document.getElementById('idle-end').value = '5'; document.getElementById('idle-end').dispatchEvent(new Event('change')); document.getElementById('pop-start').click(); document.getElementById('pop-window').click()")
+            await p.settle(0.6)
+            saved = json.load(urllib.request.urlopen(base + "/api/settings", timeout=3))["tripNotices"]
+            check("changing them is saved", saved == {"game": True, "gameStart": True, "window": False}, str(saved))
+            check("so is the parked wait", json.load(urllib.request.urlopen(base + "/api/settings", timeout=3))["tripIdleEndMin"] == 5)
+            before = len(await b.eval("fetch('/api/triplog').then(r => r.json()).then(d => d.trips.map(t => t.id))"))
+            for i in range(40):  # a second trip, with the banner now switched off
+                send({"type": "geo", "rt": 100.0 + i, "ts": 1794800000 + i, "lat": -41.3 + i * 0.000135, "lon": 174.8, "alt": 5.0, "spd": 15.0, "hdg": 0.0, "ready": True, "veh": 1, "model": "etkc"})
+            await p.settle(0.5)
+            titles = []
+            try:
+                while True:
+                    data, _ = game.recvfrom(65535)
+                    titles.append(json.loads(data).get("title"))
+            except OSError:
+                pass
+            check("with the start popup switched on, the game hears when a trip begins", "Trip started" in titles, str(titles))
+            await p.settle(4.5)
+            live = await b.eval("(() => { const cur = document.querySelector('.item[aria-current=true]'); return [cur?.dataset.id ?? null, !!cur?.querySelector('.badge'), document.getElementById('subtitle').textContent]; })()")
+            check("a trip that starts is opened on the map by itself, and is shown as being recorded", live[0] is not None and live[1] is True and "still being recorded" in live[2], str(live))
+            livestate = await b.eval("(() => [document.querySelectorAll('.car').length, document.getElementById('play').textContent, document.getElementById('golive').hidden, document.getElementById('readout').textContent])()")
+            check("a trip being driven is followed live: a car on the map, 'Pause' offered, no 'Go live' needed", livestate[0] == 1 and livestate[1] == "Pause" and livestate[2] is True and "km/h" in livestate[3], str(livestate))
+            await b.eval("document.getElementById('mapbox').scrollIntoView({block: 'start'})")
+            await b.eval("document.getElementById('headup').click()")
+            await p.settle(1.5)
+            live_rot = await b.eval("(() => { const m = document.getElementById('mapbox'), r = m.getBoundingClientRect(), c = document.querySelector('.car')?.getBoundingClientRect(); return {on: m.classList.contains('rotating'), dx: c ? Math.abs((c.left + c.width / 2) - (r.left + r.width / 2)) : 999, dy: c ? Math.abs((c.top + c.height / 2) - (r.top + r.height / 2)) : 999}; })()")
+            check("Heading up works on the live trip: the map turns about the car, which stays in the middle", live_rot["on"] is True and live_rot["dx"] < 8 and live_rot["dy"] < 8, str(live_rot))
+            before_pos = await b.eval("document.getElementById('scrub').value")
+            await p.settle(3.5)  # the game is not sending now (the 40 packets are done), but the page must not fall over; the car holds at the newest point
+            await b.eval("document.getElementById('play').click()")
+            await p.settle(0.3)
+            check("pausing leaves the live view and offers 'Go live'", await b.eval("document.getElementById('golive').hidden") is False and await b.eval("document.getElementById('play').textContent") == "Play")
+            await b.eval("document.getElementById('golive').click()")
+            await p.settle(0.4)
+            check("'Go live' returns to it", await b.eval("document.getElementById('golive').hidden") is True and await b.eval("document.getElementById('play').textContent") == "Pause")
+            await b.eval("document.getElementById('headup').click()")
+            await p.settle(0.5)
+            send({"type": "geoevent", "name": "levelEnd", "rt": 141.0, "ts": 1794800041})
+            await p.settle(1.0)
+            await b.eval("document.getElementById('auto-open').click()")  # switch it off
+            first = await b.eval("document.querySelector('.item[aria-current=true]')?.dataset.id")
+            for i in range(40):  # a third trip
+                send({"type": "geo", "rt": 300.0 + i, "ts": 1794900000 + i, "lat": -41.4 + i * 0.000135, "lon": 174.8, "alt": 5.0, "spd": 15.0, "hdg": 0.0, "ready": True, "veh": 1, "model": "etkc"})
+            await p.settle(4.5)
+            after = await b.eval("[document.querySelector('.item[aria-current=true]')?.dataset.id ?? null, document.querySelectorAll('.item .badge').length]")
+            check("with that switched off, a new trip appears in the list but the page stays where it was", after[0] == first and after[1] == 1, str((first, after)))
+            await b.eval("document.getElementById('auto-open').click()")  # and on again
+            send({"type": "geoevent", "name": "levelEnd", "rt": 341.0, "ts": 1794900041})
+            await b.goto(base + "/", wait=1.0)
+            await p.settle(0.5)
+            check("with the window banner off, none is shown", await b.eval("document.getElementById('trip-notice').hidden") is True)
+        finally:
+            game.close()
+
+        print("\n== live position feed (the map keeps up with the car)")
+        game3 = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        game3.bind(("127.0.0.1", 0))
+        M_PER_DEG = 111195.0
+        speed = 15.0
+
+        def at(t):
+            return -41.7 + t * speed / M_PER_DEG
+
+        try:
+            await b.resize(1280, 900)
+            await b.goto(base + "/trips?debug=1", wait=2.0)
+            # the window is behind the game: the browser calls it hidden and slows its timers right down
+            await b.eval("Object.defineProperty(document, 'visibilityState', {get: () => 'hidden', configurable: true})")
+            sent_rt = 0.0
+            opened_while_hidden = None
+            last_sent = None
+            loop = asyncio.get_running_loop()
+            t0 = loop.time()
+            while loop.time() - t0 < 9.0:  # nine seconds of driving north at 15 m/s: a recorded position each second, a live one ten times a second
+                rt = loop.time() - t0 + 700.0
+                if opened_while_hidden is None and loop.time() - t0 > 3.0:
+                    opened_while_hidden = await b.eval("(() => { const c = document.querySelector('.item[aria-current=true]'); return !!(c && c.querySelector('.badge')); })()")
+                if rt - sent_rt >= 1.0 or sent_rt == 0.0:
+                    sent_rt = rt
+                    game3.sendto(json.dumps({"v": 1, "type": "geo", "rt": rt, "ts": 1795100000 + int(rt), "lat": at(rt), "lon": 174.8, "alt": 5.0, "spd": speed, "hdg": 0.0, "ready": True, "veh": 1, "model": "etkc"}).encode(), ("127.0.0.1", udp))
+                game3.sendto(json.dumps({"v": 1, "type": "geolive", "rt": rt, "lat": at(rt), "lon": 174.8, "hdg": 0.0, "spd": speed}).encode(), ("127.0.0.1", udp))
+                last_sent = (rt, at(rt))
+                await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
+            debug = await b.eval("globalThis.__tripsDebug && globalThis.__tripsDebug()")
+            lag_m = abs(last_sent[1] - debug["marker"]["lat"]) * M_PER_DEG if debug and debug.get("marker") else None
+            print(f"    measured: the car on the map was {lag_m:.1f} m behind the game's position at {speed} m/s" if lag_m is not None else "    measured: no marker")
+            check("a new trip is opened by itself even while the window is hidden behind the game (the relay tells the page at once)", opened_while_hidden is True, str(opened_while_hidden))
+            await b.eval("delete document.visibilityState; Object.defineProperty(document, 'visibilityState', {get: () => 'visible', configurable: true})")
+            far = abs((debug["center"]["lat"] if debug and debug.get("center") else 0) - last_sent[1]) * M_PER_DEG if debug else None
+            check("the map is looking at the new trip (the earlier trips are 45 km away), even though the trip was opened before it had any points", far is not None and far < 3000, f"{far} m from the trip")
+            check("the page receives the live positions and follows the trip", bool(debug) and debug["live"] is True and debug["feedLive"] is True and debug["feedSamples"] > 20, str(debug))
+            check("the car on the map is within a few metres of where the game says it is (not seconds behind)", lag_m is not None and lag_m < 12.0, f"{lag_m} m behind at {speed} m/s")
+            game3.sendto(json.dumps({"v": 1, "type": "geoevent", "name": "levelEnd", "rt": 800.0, "ts": 1795100800}).encode(), ("127.0.0.1", udp))
+            await p.settle(4.0)
+            gone = await b.eval("(async () => { const ids = (await fetch('/api/triplog').then(r => r.json())).trips.map(t => t.id); const shown = location.hash.slice(1); return [shown, ids.includes(shown), document.getElementById('detail').hidden]; })()")
+            check("a trip that was open and is then thrown away (too short to keep) is left, not kept on screen", gone[2] is True or gone[1] is True, str(gone))
+        finally:
+            game3.close()
+
+        print("\n== live map widget on a dashboard")
+        layout = {"format": 1, "name": "Map test", "width": 1200, "height": 420, "scaleMode": "max", "scalePercent": 100,
+                  "widgets": [{"id": "tripmap-1", "type": "tripmap", "x": 20, "y": 20, "w": 600, "h": 380, "headUp": True, "zoom": 17}]}
+        request = urllib.request.Request(base + "/api/layouts", method="POST", data=json.dumps(layout).encode(), headers={"X-ThrashDash": "1", "Content-Type": "application/json"})
+        layout_id = json.load(urllib.request.urlopen(request, timeout=5))["id"]
+        game2 = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        try:
+            await b.resize(1200, 420)
+            await b.goto(f"{base}/?d={layout_id}", wait=3.0)
+            frame = "document.querySelector('.tm-frame').contentDocument"
+            check("the dashboard shows the map widget as a frame of the Trips page in its compact form", await b.eval("document.querySelector('.tm-frame')?.src.includes('embed=1') && document.querySelector('.tm-frame').src.includes('headup=1')") is True)
+            check("inside, only the map is shown, and it waits for a trip", await b.eval(f"{frame}.body.classList.contains('embed') && getComputedStyle({frame}.getElementById('side')).display === 'none' && getComputedStyle({frame}.getElementById('placeholder')).display !== 'none'") is True)
+            for i in range(40):
+                game2.sendto(json.dumps({"v": 1, "type": "geo", "rt": 500.0 + i, "ts": 1795000000 + i, "lat": -41.5 + i * 0.000135, "lon": 174.8, "alt": 5.0, "spd": 15.0, "hdg": 45.0, "ready": True, "veh": 1, "model": "etkc"}).encode(), ("127.0.0.1", udp))
+            await p.settle(6.0)
+            live = await b.eval(f"(() => {{ const d = {frame}; const m = d.getElementById('mapbox'); return [d.getElementById('detail').hidden, m.classList.contains('rotating'), d.querySelectorAll('.car').length, getComputedStyle(d.getElementById('placeholder')).display]; }})()")
+            check("when a trip starts the map in the dashboard opens it, follows the car and turns heading up", live[0] is False and live[1] is True and live[2] == 1 and live[3] == "none", str(live))
+            check("the frame keeps its address, so reloading it is still the widget", await b.eval(f"{frame}.defaultView.location.search.includes('embed=1')") is True)
+            await p.shot("dashboard-map")
+            game2.sendto(json.dumps({"v": 1, "type": "geoevent", "name": "levelEnd", "rt": 541.0, "ts": 1795000041}).encode(), ("127.0.0.1", udp))
+            await p.settle(0.5)
+            check("the dashboard's own policy allowed the frame and nothing was refused", not [m for m in b.console if "Refused to frame" in m[1] or "frame-src" in m[1]])
+        finally:
+            game2.close()
+
+        bad = [m for m in b.console[mark:] if m[0] == "error" and "favicon" not in m[1] and "Failed to load resource" not in m[1]]
+        check("the Trips page raised no console errors (tile loads aside)", not bad, str(bad[:3]))
+        check("and no uncaught exceptions", not b.errors, str(b.errors[:2]))
+    finally:
+        await b.goto("about:blank", wait=0.3)  # (so the page does not complain about its relay going away, which would count against the next scenario)
+        relay.kill()
+        relay.wait(timeout=5)
+        await b.resize(1400, 760)
 
 
 async def main_async(shots):
@@ -1421,7 +1844,7 @@ def main():
                 time.sleep(0.2)
         else:
             sys.exit("relay did not start: " + (relay.stderr.read().decode() if relay.poll() is not None else ""))
-        asyncio.run(asyncio.wait_for(main_async(args.keep_shots), timeout=480))
+        asyncio.run(asyncio.wait_for(main_async(args.keep_shots), timeout=1100))
     finally:
         relay.kill()
         relay.wait(timeout=5)

@@ -169,6 +169,12 @@ body.editing #top-controls { display: none; }
 .dm-pin-input:focus { border-color: var(--accent); }
 .dm-pin-save { flex: none; white-space: nowrap; }
 .dm-pin-status { color: var(--accent); }
+.dm-config-pick { width: calc(100% - 12px); margin: 2px 6px 4px; padding: 6px 8px; font: 600 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--track); border-radius: 6px; }
+.dm-config-actions { display: flex; gap: 6px; padding: 2px 6px 4px; }
+.dm-config-actions .dm-action { flex: 1 1 0; white-space: nowrap; }
+.dm-config-name { display: flex; gap: 6px; padding: 2px 6px 4px; }
+.dm-config-input { flex: 1 1 auto; min-width: 0; padding: 6px 8px; font: 600 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--accent); border-radius: 6px; outline: none; }
+.dm-changed { color: var(--warn); }
 .dm-note { padding: 2px 8px 4px; color: var(--muted); font-size: 11px; line-height: 1.35; }
 .dm-error { margin: 2px 8px 4px; padding: 6px 8px; border-radius: 6px; background: rgba(255, 77, 77, 0.12); color: #ff8a8a; font-size: 12px; line-height: 1.35; }
 .dm-foot { display: flex; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--track); }
@@ -224,12 +230,23 @@ body.editing #alerts { display: none; }
 @keyframes al-pulse { 50% { background: rgba(120, 10, 10, 0.95); } }
 @media (prefers-reduced-motion: reduce) { .al-crit { animation: none; } }
 
+/* ---- a trip ended: a short banner at the bottom, over whatever dashboard is open ---- */
+#trip-notice { position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 25; max-width: min(92vw, 720px); padding: 10px 20px; border-radius: 12px; background: rgba(20, 25, 34, 0.96); border: 1px solid var(--accent); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55); text-align: center; cursor: pointer; }
+#trip-notice[hidden] { display: none; }
+body.editing #trip-notice { display: none; }
+.tn-title { font-size: clamp(13px, 2.4vmin, 18px); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.tn-msg { margin-top: 2px; font-size: clamp(15px, 3vmin, 24px); font-weight: 600; color: var(--text); }
+
 #zoom-toast {
   position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 20; padding: 5px 14px; border-radius: 14px;
   background: rgba(20, 25, 34, 0.92); border: 1px solid var(--track); font: 600 13px var(--font); color: var(--text);
   opacity: 0; pointer-events: none; transition: opacity 0.2s;
 }
 #zoom-toast.show { opacity: 1; }
+
+.w-tripmap { width: 100%; height: 100%; background: var(--panel); border-radius: 10px; overflow: hidden; }
+.tm-frame { display: block; width: 100%; height: 100%; border: 0; }
+body.editing .tm-frame { pointer-events: none; } /* (the editor's frame handles the mouse, not the map inside) */
 
 /* ---- tyres ---- */
 .w-tyres svg, .w-damage svg { width: 100%; height: 100%; display: block; }

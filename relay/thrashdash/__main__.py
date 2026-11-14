@@ -15,9 +15,13 @@ from .output import ensure_output
 from .launcher import find_browser, open_in_default_browser, open_window, profile_in_use
 from .netinfo import is_local_client, lan_addresses
 from .paths import migrate_legacy_data, user_data_dir, web_root
+from .api import WINDOW_OPENER
 from .server import WINDOW_COUNTER, make_app
 from .store import LayoutStore, SettingsStore
-from .windows import WindowRegistry, open_windows
+from .triplog import TripLog
+from .configs import ConfigStore
+from .windows import WindowRegistry, open_config_windows, open_windows
+from .tripnotice import TripNotices
 from .udp import start_listener
 from .validate import VEHICLE_RE
 
@@ -55,10 +59,17 @@ async def amain(args):
     args.simulate = args.simulate or bool(args.sim_vehicles)  # naming simulated vehicles implies --simulate
     migrate_legacy_data()  # first run under the new name: carry over what was saved under the old one
     data_dir = user_data_dir()
-    hub = Hub(simulated=args.simulate, trip_path=None if args.simulate else data_dir / "trips.json")  # (the simulator's fake drives are not worth keeping)
-    layouts = LayoutStore(data_dir / "layouts", web_root() / "layouts", on_skip=lambda path, why: print(f"  skipped unreadable layout {path.name}: {why}", file=sys.stderr))
     settings = SettingsStore(data_dir / "settings.json")
+    notices = TripNotices(settings)  # popups about trips, in the game and on the dashboard windows
+    triplog = None if args.simulate else TripLog(data_dir / "triplog", on_notice=notices.publish)  # where the car has been, from BeamNG.Earth (a simulated run keeps none)
+    if triplog is not None:
+        triplog.set_idle_end(settings.get()["tripIdleEndMin"] * 60)
+    hub = Hub(simulated=args.simulate, trip_path=None if args.simulate else data_dir / "trips.json", triplog=triplog)  # (the simulator's fake drives are not worth keeping)
+    if triplog is not None:
+        triplog.on_change = hub.add_trip_event  # (a page watching the trip list is told the moment a trip starts or ends)
+    layouts = LayoutStore(data_dir / "layouts", web_root() / "layouts", on_skip=lambda path, why: print(f"  skipped unreadable layout {path.name}: {why}", file=sys.stderr))
     lan = LanController(args.http_port, addresses=(lambda: [args.debug_lan_address]) if args.debug_lan_address else lan_addresses)
+    configs = ConfigStore(data_dir / "configs.json")  # saved sets of windows: the last one saved or picked is opened at start-up
     windows = WindowRegistry(None if args.simulate else data_dir / "windows.json")  # (as with trips, a simulated run is not remembered)
     auth = AuthStore(data_dir / "auth.json")
     if args.debug_pin:
@@ -66,7 +77,7 @@ async def amain(args):
             print("--debug-pin must be 4 to 8 digits", file=sys.stderr)
             return 2
         auth.set_pin(args.debug_pin)
-    app = make_app(hub, args.http_port, layouts, settings, lan=lan, auth=auth, local_check=(lambda remote: False) if args.debug_treat_clients_as_remote else is_local_client, windows=windows)
+    app = make_app(hub, args.http_port, layouts, settings, lan=lan, auth=auth, local_check=(lambda remote: False) if args.debug_treat_clients_as_remote else is_local_client, windows=windows, notices=notices, configs=configs)
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     lan.attach(runner)
@@ -80,13 +91,15 @@ async def amain(args):
         return 2
 
     background = []
+    if triplog is not None:
+        background.append(asyncio.create_task(tick_triplog(triplog)))
     transport = None
     if args.simulate:
         background.append(asyncio.create_task(simulator.run(hub, vehicles=sim_vehicles, period=max(1.0, args.sim_vehicle_seconds))))
         source = "SIMULATED telemetry"
     else:
         try:
-            transport = await start_listener(hub, "127.0.0.1", args.udp_port)
+            transport = await start_listener(hub, "127.0.0.1", args.udp_port, notices)
         except OSError as e:
             print(f"Cannot listen for BeamNG on UDP port {args.udp_port}: {e}\nIs another listener (or a second ThrashDash) running?", file=sys.stderr)
             await runner.cleanup()
@@ -121,8 +134,12 @@ async def amain(args):
             def launch(window_url, size, position, fullscreen, x11):
                 return open_window(window_url, args.browser, size=size, position=position, fullscreen=fullscreen, x11=x11)
 
+            async def open_for_config(config_windows):
+                return await open_config_windows(windows, config_windows, settings.get().get("exactWindowPlacement") is True, launch, url.rstrip("/"), asyncio.sleep)
+
+            app[WINDOW_OPENER]["open"] = open_for_config  # (picking a config while running opens its windows)
             # In the background: it may wait a moment for windows left open by the previous run to reconnect.
-            background.append(asyncio.create_task(report_windows(windows, settings, launch, url.rstrip("/"), browser)))
+            background.append(asyncio.create_task(report_windows(windows, settings, launch, url.rstrip("/"), browser, configs)))
     stop = asyncio.Event()
     if args.quit_when_windows_close:
         # With --no-window the user is opening the page themselves, so there is no "the window never opened" to quit for.
@@ -143,8 +160,15 @@ async def amain(args):
     return 0
 
 
-async def report_windows(windows, settings, launch, base_url, browser):
-    opened = await open_windows(windows, settings, launch, base_url, profile_in_use, asyncio.sleep)
+async def tick_triplog(triplog, period=5.0):
+    """Ends the trip being recorded when the game stops sending positions (it was closed)."""
+    while True:
+        await asyncio.sleep(period)
+        triplog.tick()
+
+
+async def report_windows(windows, settings, launch, base_url, browser, configs=None):
+    opened = await open_windows(windows, settings, launch, base_url, profile_in_use, asyncio.sleep, configs=configs)
     print(f"  window{'s' if opened != 1 else ' '}  : {opened} opened with {browser}")
 
 

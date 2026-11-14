@@ -14,17 +14,20 @@ const TRASH = ["M5 7h14", "M10 7V5h4v2", "M7 7l1 12h8l1-12", "M10 11v5M14 11v5"]
  *   load(id)                show another dashboard in this window (pins the window to it)
  *   remove(layout)          ask for confirmation and delete a saved dashboard; resolves true if it was deleted
  *   openWindow(id)          open a new window, the same size as this one, showing a dashboard
+ *   openTrips()             open the Trips page (the log of drives recorded with BeamNG.Earth)
  *   skins(), currentSkin(), setSkin(id)    the looks, and the one in use for the open dashboard
  *   vehicle()               the vehicle key being driven ("etkc"), or null
  *   pinned()                true if this window was set to one dashboard (so it does not follow vehicle rules)
  *   follow()                make this window follow the vehicle rules again
  *   onToggle(open)          optional
  */
-export function createSwitcher({ button, menu, api, currentId, load, remove, openWindow, skins, currentSkin, setSkin, vehicle, pinned, follow, onToggle = () => {} }) {
+export function createSwitcher({ button, menu, api, currentId, load, remove, openWindow, openTrips = () => {}, skins, currentSkin, setSkin, vehicle, pinned, follow, onToggle = () => {} }) {
   let isOpen = false;
   let items = []; // ids in display order, for the 1-9 shortcuts
   let networkError = ""; // why the last attempt to switch network access on failed
   let pinMessage = ""; // what to say under the PIN field after saving it (or failing to)
+  let configAsking = false; // the name box of "Save as" is open
+  let configMessage = ""; // what to say under the config buttons (what a save did, or why it failed)
 
   const buttons = () => [...menu.querySelectorAll(".dm-item, .dm-skin, .dm-action")].filter((b) => !b.disabled);
 
@@ -68,7 +71,97 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
     if (await remove(layout)) await refresh();
   }
 
-  function render(layouts, settings, client, lan = { pin: { set: false, pin: "" }, token: null }) {
+  // ---- window config: the windows open now (dashboards and the map window) saved as a set ---------------------------------
+  async function configCall(work, ok) {
+    configMessage = "";
+    try {
+      const result = await work();
+      configMessage = typeof ok === "function" ? ok(result) : ok ?? "";
+    } catch (e) {
+      configMessage = e.message;
+    }
+    configAsking = false;
+    await refresh();
+  }
+
+  function renderConfigs(configs, local) {
+    h("div", "dm-title dm-title-sep", menu, "Window config");
+    const active = configs.configs.find((c) => c.id === configs.active) ?? null;
+    h("div", "dm-note", menu, "Saves the windows open now (the dashboards and the map window, each with its size and place). The one last saved or picked opens when ThrashDash starts.");
+    const pick = h("select", "dm-config-pick", menu);
+    pick.setAttribute("aria-label", "Saved window config");
+    const none = h("option", "", pick, configs.configs.length ? "(none loaded)" : "(none saved yet)");
+    none.value = "";
+    for (const c of configs.configs) {
+      const o = h("option", "", pick, `${c.name} (${c.windows.length} ${c.windows.length === 1 ? "window" : "windows"})`);
+      o.value = c.id;
+    }
+    pick.value = active ? active.id : "";
+    pick.disabled = !local;
+    pick.addEventListener("change", () => configCall(() => api.activateConfig(pick.value || null), (r) => (r.opened ? `Opened ${r.opened} more ${r.opened === 1 ? "window" : "windows"}. Windows already open stay open.` : "")));
+    const row = h("div", "dm-config-actions", menu);
+    const save = h("button", "dm-action", row, "Save");
+    save.type = "button";
+    save.title = active ? `Overwrite \u201c${active.name}\u201d with the windows open now` : "Nothing is loaded to overwrite: this saves a new config";
+    save.disabled = !local || (Boolean(active) && !configs.changed);
+    save.addEventListener("click", () => {
+      if (active) configCall(() => api.saveConfig(active.id), `Saved \u201c${active.name}\u201d.`);
+      else configAsking = true, refresh();
+    });
+    const saveAs = h("button", "dm-action", row, "Save as\u2026");
+    saveAs.type = "button";
+    saveAs.title = "Save the windows open now as a new config";
+    saveAs.disabled = !local;
+    saveAs.addEventListener("click", () => {
+      configAsking = true;
+      refresh();
+    });
+    const del = h("button", "dm-action", row, "Delete");
+    del.type = "button";
+    del.disabled = !local || !active;
+    del.title = active ? `Delete \u201c${active.name}\u201d` : "";
+    let sure = false;
+    del.addEventListener("click", () => {
+      if (!sure) {
+        sure = true;
+        del.textContent = "Really?";
+        setTimeout(() => {
+          sure = false;
+          del.textContent = "Delete";
+        }, 4000);
+        return;
+      }
+      configCall(() => api.deleteConfig(active.id), "Deleted.");
+    });
+    if (configAsking) {
+      const form = h("form", "dm-config-name", menu);
+      const input = h("input", "dm-config-input", form);
+      input.type = "text";
+      input.maxLength = 40;
+      input.placeholder = "Name of the new config";
+      input.setAttribute("aria-label", "Name of the new config");
+      input.autocomplete = "off";
+      const ok = h("button", "dm-action", form, "Save");
+      ok.type = "submit";
+      const cancel = h("button", "dm-action", form, "Cancel");
+      cancel.type = "button";
+      cancel.addEventListener("click", () => {
+        configAsking = false;
+        refresh();
+      });
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        if (input.value.trim()) configCall(() => api.createConfig(input.value.trim()), "Saved.");
+      });
+      queueMicrotask(() => input.focus());
+    }
+    const status = !local ? "Only the computer running ThrashDash can save configs."
+      : configMessage || (active ? (configs.changed ? `Windows changed since saved. Save overwrites \u201c${active.name}\u201d; Save as\u2026 makes a new config.` : `\u201c${active.name}\u201d is loaded.`)
+        : `${configs.open} ${configs.open === 1 ? "window is" : "windows are"} open. Nothing saved yet.`);
+    h("div", `dm-note${configs.changed && active && !configMessage ? " dm-changed" : ""}`, menu, status);
+  }
+
+  function render(layouts, settings, client, lan = { pin: { set: false, pin: "" }, token: null }, configs = null) {
     const local = client.local; // only the computer running ThrashDash may change things; a phone or tablet can only look
     menu.replaceChildren();
     items = layouts.map((l) => l.id);
@@ -148,6 +241,18 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
         await follow();
       });
     }
+
+    if (configs) renderConfigs(configs, local);
+
+    // The log of drives (BeamNG.Earth), on a page of its own: a map, the figures and a graph for each trip.
+    h("div", "dm-title dm-title-sep", menu, "Trips");
+    const trips = h("button", "dm-action dm-wide", menu, "Open the trip log");
+    trips.type = "button";
+    trips.title = "Every drive recorded with BeamNG.Earth: its route on a map, speeds, fuel and more";
+    trips.addEventListener("click", () => {
+      hide();
+      openTrips();
+    });
 
     if (local) {
       // Serving to phones and tablets on the same network (switched on and off here, no restart). It always needs a PIN.
@@ -254,7 +359,8 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
         lan.pin = await api.getLanPin().catch(() => lan.pin);
         if (client.lan.enabled) lan.token = await api.lanToken().then((r) => r.token).catch(() => null);
       }
-      render(layouts, settings, client, lan);
+      const configs = await api.listConfigs().catch(() => null);
+      render(layouts, settings, client, lan, configs);
     } catch (e) {
       menu.replaceChildren();
       h("div", "dm-empty", menu, `Could not load the list: ${e.message}`);
@@ -265,6 +371,8 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
   }
 
   async function show() {
+    configMessage = ""; // (what the last config action said is not news when the menu is opened again)
+    configAsking = false;
     if (isOpen) return;
     await refresh();
     isOpen = true;

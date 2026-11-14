@@ -13,8 +13,9 @@ import * as damage from "./damage.js";
 import * as inputs from "./inputs.js";
 import * as gmeter from "./gmeter.js";
 import * as trip from "./trip.js";
+import * as tripmap from "./tripmap.js";
 
-export const registry = { roundGauge, bar, gear, light, readout, graph, text, tyres, damage, inputs, gmeter, trip };
+export const registry = { roundGauge, bar, gear, light, readout, graph, text, tyres, damage, inputs, gmeter, trip, tripmap };
 
 /** type -> spec, for code that only needs the property descriptions (no DOM). */
 export const specs = Object.fromEntries(Object.entries(registry).map(([type, impl]) => [type, impl.spec]));
