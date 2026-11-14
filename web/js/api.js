@@ -26,6 +26,8 @@ export const api = {
   deleteLayout: (id) => call("DELETE", `/api/layouts/${encodeURIComponent(id)}`),
   resetTrip: (name) => call("POST", `/api/trips/${encodeURIComponent(name)}/reset`),
   /** This window reports itself to the relay (see windowState.js). */
+  /** Every remembered window: {windows: {id: {kind, dashboard, width, height, x, y, ...}}, live: [ids]}. */
+  listWindows: () => call("GET", "/api/windows"),
   putWindow: (id, report) => call("PUT", `/api/windows/${encodeURIComponent(id)}`, report),
   /** This window was closed. `keepalive` lets the request finish while the page is going away. */
   forgetWindow: (id, stamp) => call("DELETE", `/api/windows/${encodeURIComponent(id)}?t=${encodeURIComponent(stamp)}`, undefined, { keepalive: true }),

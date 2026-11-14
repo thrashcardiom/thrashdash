@@ -8,6 +8,7 @@ import { api } from "../api.js";
 import { h, s } from "../dom.js";
 import { buildPrefs, resolveUnit } from "../units.js";
 import { createWindowReporter, ensureWindowId } from "../windowState.js";
+import { applySavedPlacement } from "../windowPlace.js";
 import { formatDuration } from "../economy.js";
 import { RAMP, REPLAY_RATES, advanceLive, interpolateFeed, liveReadout, nextAutoOpen, WHEN_OPTIONS, advanceReplay, clockText, colourScaleTop, filterOptions, filterRoutes, overviewTiles, routesBounds, turnToward, clampMapHeight, MAP_STEP_PX, distanceText, graphModel, replayReadout, routeRuns, sameTrip, sampleAtDistance, speedText, statTiles, tripTitle } from "./model.js";
 
@@ -1039,9 +1040,10 @@ async function tick() {
 // saves (Dashboards menu, Window config) and is reopened at start-up. Only the computer running ThrashDash takes part, and not a
 // map embedded in a dashboard or a shared file.
 
-function reportAsWindow() {
+async function reportAsWindow() {
   if (EMBED || SHARED || !state.client.local) return;
   const id = ensureWindowId();
+  await applySavedPlacement(id, { getSettings: () => api.getSettings(), listWindows: () => api.listWindows() }); // (before reporting, or the report would overwrite what is remembered)
   createWindowReporter({
     id,
     state: () => ({ id: null, pinned: false, kind: "trips" }),

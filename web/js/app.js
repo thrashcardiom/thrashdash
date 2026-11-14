@@ -8,6 +8,7 @@ import { confirmDialog, infoDialog } from "./editor/dialog.js";
 import { createSwitcher } from "./switcher.js";
 import { buildPrefs } from "./units.js";
 import { createWindowReporter, ensureWindowId, randomWindowId } from "./windowState.js";
+import { applySavedPlacement } from "./windowPlace.js";
 import { openDashboardWindow, tripsUrl } from "./windows.js";
 import { specs } from "./widgets/index.js";
 import { createTripNotice } from "./tripnotice.js";
@@ -142,12 +143,21 @@ function render(layout) {
   dashboard.update(app.values);
 }
 
+let reportingStarted = false;
+/** Put this window where it was remembered (if exact placement is on), and only then start telling the relay where it is. */
+async function startReporting() {
+  if (reportingStarted) return;
+  reportingStarted = true;
+  await applySavedPlacement(windowId, { getSettings: () => api.getSettings(), listWindows: () => api.listWindows() });
+  windowReporter.start();
+}
+
 function showLoaded(result) {
   Object.assign(app, { id: result.id, builtin: result.builtin, prefs: result.prefs, skins: result.skins ?? app.skins, alerts: result.alerts ?? app.alerts, client: result.client ?? app.client }); // keep what we know if the caller did not reload settings
   render(result.layout);
   controls.hidden = false;
   editButton.hidden = !app.client.local; // a phone or tablet on the network can look, not edit
-  if (app.client.local) windowReporter.start(); // (does nothing if already started)
+  if (app.client.local) startReporting(); // (does nothing if already started)
   windowReporter.notify();
 }
 

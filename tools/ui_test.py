@@ -1677,6 +1677,23 @@ async def trips_scenario(b, p):
         await p.settle(0.5)
         await b.eval("localStorage.clear()")
 
+        print("\n== a window puts itself where it was remembered (exact placement)")
+        placed_script = (await b.send("Page.addScriptToEvaluateOnNewDocument", source="window.__placed = []; window.resizeTo = (w, h) => window.__placed.push(['resize', w, h]); window.moveTo = (x, y) => window.__placed.push(['move', x, y]);"))["identifier"]
+        call("PUT", "/api/windows/placetest1234", {"dashboard": "default", "pinned": True, "width": 777, "height": 333, "x": 444, "y": 222, "stamp": 5000})
+        call("PUT", "/api/settings", {"exactWindowPlacement": False})
+        await b.resize(1200, 700)
+        await b.goto(base + "/?d=default&w=placetest1234", wait=2.5)
+        check("with exact placement off, a window is left where the system put it", await b.eval("window.__placed") == [], str(await b.eval("window.__placed")))
+        call("PUT", "/api/windows/placetest1234", {"dashboard": "default", "pinned": True, "width": 777, "height": 333, "x": 444, "y": 222, "stamp": int(time.time() * 1000)})  # (a stamp as late as the page's own: its earlier close would otherwise outrank this report)
+        call("PUT", "/api/settings", {"exactWindowPlacement": True})
+        await b.goto(base + "/?d=default&w=placetest1234", wait=3.0)
+        check("with it on, the window sizes and moves itself to what the relay remembers of it", await b.eval("window.__placed") == [["resize", 777, 333], ["move", 444, 222]], str(await b.eval("window.__placed")))
+        call("PUT", "/api/windows/placetest5678", {"kind": "trips", "width": 901, "height": 555, "x": 12, "y": 34, "stamp": 7000})
+        await b.goto(base + "/trips?w=placetest5678", wait=3.0)
+        check("and so does the map window", await b.eval("window.__placed") == [["resize", 901, 555], ["move", 12, 34]], str(await b.eval("window.__placed")))
+        call("PUT", "/api/settings", {"exactWindowPlacement": False})
+        await b.send("Page.removeScriptToEvaluateOnNewDocument", identifier=placed_script)
+
         print("\n== a shared trip (one html file, opened from disk)")
         shared = data / "shared-trip.html"
         shared.write_bytes(urllib.request.urlopen(base + "/api/triplog/20261113T210639Z/share", timeout=10).read())
