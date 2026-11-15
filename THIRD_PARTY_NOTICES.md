@@ -50,7 +50,7 @@ Jost, Barlow Condensed and DSEG7 Classic are used under the SIL Open Font Licens
 
 ## Map library
 
-The Trips page draws its map with [Leaflet](https://leafletjs.com/) 1.9.4, BSD-2-Clause, bundled as a plain file in [web/vendor/leaflet/](web/vendor/leaflet/) with its licence (`leaflet-LICENSE.txt` in the AppImage's licence folder). A trip shared as one html file (the Share button) contains a copy of Leaflet, with its licence notice inside the file. The map pictures themselves are not bundled: the page loads them from OpenStreetMap (street map, &copy; OpenStreetMap contributors, ODbL) and from EOX (satellite picture: Sentinel-2 cloudless 2016 by EOX IT Services GmbH, contains modified Copernicus Sentinel data 2016, CC BY 4.0), and shows their credits on the map.
+The Trips page draws its map with [Leaflet](https://leafletjs.com/) 1.9.4, BSD-2-Clause, bundled as a plain file in [web/vendor/leaflet/](web/vendor/leaflet/) with its licence (`leaflet-LICENSE.txt` in the AppImage's licence folder); a trip shared as one html file (the Share button) contains a copy of Leaflet, with its licence notice inside the file. The map pictures themselves are not bundled: the page loads them from OpenStreetMap (street map, &copy; OpenStreetMap contributors, ODbL) and from EOX (satellite picture: Sentinel-2 cloudless 2016 by EOX IT Services GmbH, contains modified Copernicus Sentinel data 2016, CC BY 4.0), and shows their credits on the map.
 
 ## Licence texts
 

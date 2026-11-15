@@ -16,7 +16,7 @@
 - **No accounts and no cloud.** Everything runs on your computer. The one thing that uses the internet is the map pictures (OpenStreetMap, or EOX's satellite picture); nothing about your trips is sent anywhere.
 
 > [!NOTE]
-> ThrashDash is at version 0.1.0. It has been developed and tested against BeamNG.drive 0.40.5 and BeamNG.Earth 1.9 on Linux. Windows should work but is untested (see [Known limitations](#known-limitations)).
+> ThrashDash is at version 0.1.0. It has been developed and tested against BeamNG.drive 0.40.5 and BeamNG.Earth 1.9 on Linux. The Windows build has been compiled and run once on Windows 11 and worked, but has had much less use than the Linux one (see [Known limitations](#known-limitations)).
 
 ## Contents
 
@@ -64,7 +64,7 @@ Everything stays on your computer. The game talks only to `127.0.0.1`, and the p
 |:---|:---|:---|
 | **Game** | BeamNG.drive (tested on 0.40.5, native Linux build) | the same |
 | **Trip log and map** | [BeamNG.Earth](https://github.com/TecnaGamer/BeamNG.Earth) installed and its level loaded (tested with the Earth app 1.9) | the same |
-| **Operating system** | Linux, x86_64, any distribution from about 2022 on. A Windows 10/11 64-bit zip is built from the same code (untested). | Linux, or Windows (untested); anything Python runs on |
+| **Operating system** | Linux, x86_64, any distribution from about 2022 on. A Windows 10/11 64-bit zip is built from the same code (lightly tested). | Linux or Windows; anything Python runs on |
 | **Python** | Not needed: it is inside the AppImage | 3.10 or newer (developed on 3.13), plus [`aiohttp`](https://docs.aiohttp.org/) 3.9 or newer |
 | **Browser** | A Chromium-based browser for the borderless windows: Chrome, Edge, Brave or Chromium. Without one, ThrashDash opens your default browser. | the same (Edge comes with Windows) |
 | **Internet** | Only for the map pictures. The route, figures and graph work without it. | the same |
@@ -115,7 +115,7 @@ Things to know about the AppImage:
 ### Option B: the Windows zip
 
 > [!NOTE]
-> The Windows program is built from the same code, but it has not been run on Windows yet. Expect rough edges and please report them.
+> The Windows program is built from the same code. It has been built and run on Windows, but far less than the Linux one, so expect some rough edges and please report them.
 
 Download `ThrashDash-<version>-windows-x64.zip` from the project's [Releases page](https://github.com/thrashcardiom/thrashdash/releases) (or build it yourself: [Building the Windows program](docs/reference.md#building-the-windows-program)), unzip it anywhere, and open the folder. It uses Microsoft Edge, Chrome or Brave for its windows; Edge comes with Windows.
 
@@ -132,7 +132,7 @@ Download `ThrashDash-<version>-windows-x64.zip` from the project's [Releases pag
 Things to know:
 
 - **Windows SmartScreen** may say "Windows protected your PC" the first time, and some antivirus programs distrust any program made with PyInstaller. The program is not code-signed. Choose *More info, Run anyway*, or check the file against the checksum on the Releases page.
-- **Windows Defender Firewall** asks the first time if ThrashDash may accept connections, when you switch on network access for phones. That is Windows' own question, and your decision.
+- **Windows Defender Firewall** asks if ThrashDash may accept connections the first time it starts listening for other devices, which is when you switch on network access for phones (after choosing a PIN). That is Windows' own question and your decision; for a phone on your home network, **Private networks** is what is needed. Nothing is asked if you never switch network access on.
 - **Messages** from `thrashdash.exe` (which has no console window) go to `thrashdash.log` in `%LOCALAPPDATA%\ThrashDash`; the same folder holds your dashboards, settings and trips.
 
 ### Option C: from the source
@@ -402,7 +402,7 @@ Useful command-line options (the full list is in the reference): `--simulate` (f
 
 ## Known limitations
 
-- **Windows is untested.** There is a Windows build recipe (`packaging/build.ps1`) and the program is meant to run there as a zip with `thrashdash.exe`, but neither has been run on Windows yet. The code is written to work there (paths, launching, positions), and the folder it installs the mod into is a best guess.
+- **Windows is lightly tested.** The Windows build recipe (`packaging/build.ps1`) has been used to build `thrashdash.exe` and it ran and worked on one Windows machine, but it has seen far less use than the Linux version. If `--install-mod` cannot find the game's user folder, name it yourself.
 - **The trip log needs BeamNG.Earth** and was developed against its modding API, version 1.8 (the Earth app 1.9). A future change to that API could stop the log until ThrashDash is updated: the game extension does nothing, harmlessly, when the API is not there.
 - **Speeding is counted only where a limit is posted**, which is about one road in ten in BeamNG.Earth's data. The figure is honest about how much of the trip it covers, but it is not a full picture.
 - **Peak G is not recorded.** The position is sampled once a second, which is too coarse to catch a peak.
