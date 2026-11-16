@@ -14,14 +14,13 @@ const TRASH = ["M5 7h14", "M10 7V5h4v2", "M7 7l1 12h8l1-12", "M10 11v5M14 11v5"]
  *   load(id)                show another dashboard in this window (pins the window to it)
  *   remove(layout)          ask for confirmation and delete a saved dashboard; resolves true if it was deleted
  *   openWindow(id)          open a new window, the same size as this one, showing a dashboard
- *   openTrips()             open the Trips page (the log of drives recorded with BeamNG.Earth)
  *   skins(), currentSkin(), setSkin(id)    the looks, and the one in use for the open dashboard
  *   vehicle()               the vehicle key being driven ("etkc"), or null
  *   pinned()                true if this window was set to one dashboard (so it does not follow vehicle rules)
  *   follow()                make this window follow the vehicle rules again
  *   onToggle(open)          optional
  */
-export function createSwitcher({ button, menu, api, currentId, load, remove, openWindow, openTrips = () => {}, skins, currentSkin, setSkin, vehicle, pinned, follow, onToggle = () => {} }) {
+export function createSwitcher({ button, menu, api, currentId, load, remove, openWindow, skins, currentSkin, setSkin, vehicle, pinned, follow, onToggle = () => {} }) {
   let isOpen = false;
   let items = []; // ids in display order, for the 1-9 shortcuts
   let networkError = ""; // why the last attempt to switch network access on failed
@@ -244,16 +243,6 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
 
     if (configs) renderConfigs(configs, local);
 
-    // The log of drives (BeamNG.Earth), on a page of its own: a map, the figures and a graph for each trip.
-    h("div", "dm-title dm-title-sep", menu, "Trips");
-    const trips = h("button", "dm-action dm-wide", menu, "Open the trip log");
-    trips.type = "button";
-    trips.title = "Every drive recorded with BeamNG.Earth: its route on a map, speeds, fuel and more";
-    trips.addEventListener("click", () => {
-      hide();
-      openTrips();
-    });
-
     if (local) {
       // Serving to phones and tablets on the same network (switched on and off here, no restart). It always needs a PIN.
       h("div", "dm-title dm-title-sep", menu, "Phones and other devices");
@@ -345,30 +334,6 @@ export function createSwitcher({ button, menu, api, currentId, load, remove, ope
       win.addEventListener("click", () => {
         hide();
         openWindow(currentId());
-      });
-      const quit = h("button", "dm-action dm-quit", foot, "Quit ThrashDash");
-      quit.type = "button";
-      quit.title = "Stop ThrashDash. Its windows close with it (they come back next time it starts)";
-      let sure = false;
-      quit.addEventListener("click", async () => {
-        if (!sure) {
-          sure = true; // asks once more, like Delete does
-          quit.textContent = "Really quit?";
-          setTimeout(() => {
-            sure = false;
-            quit.textContent = "Quit ThrashDash";
-          }, 4000);
-          return;
-        }
-        quit.disabled = true;
-        quit.textContent = "Quitting\u2026";
-        try {
-          await api.quit();
-        } catch (e) {
-          quit.disabled = false;
-          quit.textContent = "Quit ThrashDash";
-          console.warn("ThrashDash: could not quit", e);
-        }
       });
     }
   }

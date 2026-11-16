@@ -25,6 +25,7 @@ The dashboard is drawn on a fixed-size canvas that scales to fit the window. By 
 |:---|:---|
 | **D** | Open or close the Dashboards menu |
 | **E** | Edit this dashboard (this computer only) |
+| **T** | Open the Trips window (the trip log and map) |
 | **S** | Cycle through the looks |
 | **N** | Open a new window the same size as this one (this computer only) |
 | **+** / **-** / **0** | Zoom in, zoom out, reset (also Ctrl+scroll) |
@@ -45,9 +46,8 @@ Press **D** or click **Dashboards**. From top to bottom:
 - **Look of this dashboard**: the four [looks](#looks-skins).
 - **Vehicle**: which car you are driving, *Use this dashboard for this vehicle*, *Switch automatically when the vehicle changes*, and *Follow the vehicle rules in this window*. See [per-vehicle dashboards](#per-vehicle-dashboards).
 - **Window config**: save the windows that are open now (the dashboards and the map window, with their sizes and places) as a named set, and pick one to open again. See [windows](../README.md#windows-remembering-saving-and-closing).
-- **Trips**: **Open the trip log**, the map window. See [the Trips page](../README.md#the-trips-page).
 - **Phones and other devices**: choose the PIN, switch on network access and get the address and QR code. See [phones and tablets](../README.md#phones-and-tablets).
-- **Use as default**, **New window** and **Quit ThrashDash** at the foot.
+- **Use as default** and **New window** at the foot. (**Quit** is its own button beside **Edit**, not in the menu.)
 
 ![The Dashboards menu](screenshots/menu.png)
 
@@ -301,7 +301,7 @@ A dot that moves with the force on the car, with a trail and a held peak. Layout
 
 ### Live map (BeamNG.Earth)
 
-A live map of the trip being driven, on a dashboard, placed and sized like any other widget and saved with the dashboard (**Save** overwrites it, **Save as** makes a copy). It is the Trips page's own map in a compact form (a frame of `/trips?embed=1`), so it follows the car, can turn **heading up**, and draws the route exactly as the Trips page does; it reads "Waiting for a trip" until one starts, then opens each new trip by itself. Needs BeamNG.Earth and internet for the map pictures (street map, or the satellite picture if ticked). Layout type: `tripmap`. Default size 420 × 300.
+A live map of the trip being driven, on a dashboard, placed and sized like any other widget and saved with the dashboard (**Save** overwrites it, **Save as** makes a copy). It is the Trips page's own map in a compact form (a frame of `/trips?embed=1`), so it follows the car, can turn **heading up**, and draws the route exactly as the Trips page does; it reads "Waiting for a trip" until one starts, then opens each new trip by itself. It also shows the posted speed limit as a road sign in the corner (flashing while the car is over it), and a **Re-centre on the car** button if you move the map away. Needs BeamNG.Earth and internet for the map pictures (street map, or the satellite picture if ticked). Layout type: `tripmap`. Default size 420 × 300.
 
 | Property | Type | What it does | Values |
 |:---|:---|:---|:---|

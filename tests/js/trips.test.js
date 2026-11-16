@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clampMapHeight, interpolateFeed, liveReadout, advanceLive, nextAutoOpen, turnToward, WHEN_OPTIONS, filterOptions, filterRoutes, overviewTiles, routeTotals, routesBounds, REPLAY_RATES, advanceReplay, clockText, isOver, limitAt, replayReadout, RAMP, colourScaleTop, distanceAtTime, graphModel, niceTicks, routeRuns, sameTrip, sampleAtDistance, sampleAtTime, speedBucket, statTiles, tripTitle } from "../../web/js/trips/model.js";
+import { clampMapHeight, interpolateFeed, liveReadout, advanceLive, nextAutoOpen, turnToward, WHEN_OPTIONS, filterOptions, filterRoutes, overviewTiles, routeTotals, routesBounds, REPLAY_RATES, advanceReplay, clockText, isOver, limitAt, replayReadout, RAMP, colourScaleTop, distanceAtTime, graphModel, niceTicks, routeRuns, sameTrip, sampleAtDistance, sampleAtTime, speedBucket, statTiles, tripTitle, filterTrips, tabTitle, recentTotals } from "../../web/js/trips/model.js";
 import { buildPrefs } from "../../web/js/units.js";
 
 const prefs = buildPrefs({}, "");
@@ -324,4 +324,31 @@ test("a map's height stays between a usable minimum and the room the window has"
   assert.equal(clampMapHeight(NaN, 900), 200);
   assert.equal(clampMapHeight(333.6, 900), 334, "whole pixels");
   assert.equal(clampMapHeight(400, undefined), 400, "no window height known: a sensible one is assumed");
+});
+
+test("filterTrips: every word must match, in any case and any order; no words keeps everything", () => {
+  const trips = [{ id: 1, name: "Courtenay Place to Hutt Road" }, { id: 2, name: "Around Oriental Parade" }, { id: 3, name: "Hutt Road to Petone" }];
+  const text = (t) => t.name;
+  assert.deepEqual(filterTrips(trips, "", text), trips);
+  assert.deepEqual(filterTrips(trips, "   ", text), trips);
+  assert.deepEqual(filterTrips(trips, "hutt", text).map((t) => t.id), [1, 3]);
+  assert.deepEqual(filterTrips(trips, "ROAD hutt", text).map((t) => t.id), [1, 3]);
+  assert.deepEqual(filterTrips(trips, "hutt petone", text).map((t) => t.id), [3]);
+  assert.deepEqual(filterTrips(trips, "nowhere", text), []);
+  assert.deepEqual(filterTrips(trips, undefined, text), trips);
+});
+
+test("tabTitle marks a recording and leaves the title alone otherwise", () => {
+  assert.equal(tabTitle("ThrashDash: Trips", false), "ThrashDash: Trips");
+  assert.equal(tabTitle("ThrashDash: Trips", true), "\u25CF Recording: ThrashDash: Trips");
+});
+
+test("recentTotals adds up the trips of the last seven days only", () => {
+  const now = 1_800_000_000_000;
+  const day = 86400;
+  const t = (daysAgo, distance, duration) => ({ ts: now / 1000 - daysAgo * day, distance, duration });
+  assert.deepEqual(recentTotals([t(1, 1000, 60), t(6.9, 2500, 120), t(7.1, 9999, 999), t(40, 5000, 500)], now), { count: 2, distance: 3500, duration: 180 });
+  assert.deepEqual(recentTotals([t(0.1, undefined, null)], now), { count: 1, distance: 0, duration: 0 }, "a trip with no figures yet still counts");
+  assert.deepEqual(recentTotals([], now), { count: 0, distance: 0, duration: 0 });
+  assert.equal(recentTotals([t(20, 1, 1)], now, 30).count, 1, "the number of days can be changed");
 });

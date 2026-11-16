@@ -35,6 +35,16 @@ button, input { font: inherit; color: inherit; }
 .popups .idle { display: block; line-height: 1.8; }
 .popups select { padding: 2px 6px; background: var(--track); border: 0; border-radius: 6px; color: var(--text); }
 .popups p { margin: 6px 0 0; font-size: 12px; }
+.search { display: block; width: calc(100% - 24px); margin: 0 12px 8px; padding: 7px 10px; font: 14px var(--font, inherit); color: var(--text); background: var(--bg); border: 1px solid var(--track); border-radius: 8px; box-sizing: border-box; }
+.search:focus { outline: none; border-color: var(--accent); }
+.search[hidden] { display: none; }
+.btn.small.quit { margin-left: 0; }
+.btn.small.quit:hover { color: var(--crit); }
+.btn.small.quit[hidden] { display: none; }
+.totals { margin: 0 12px 8px; font-size: 13px; }
+.starred-row { display: flex; align-items: center; gap: 8px; margin: 0 12px 8px; font-size: 14px; color: var(--muted); }
+.starred-row[hidden] { display: none; }
+.star { color: #ffc83d; margin-right: 6px; }
 .list { list-style: none; margin: 0; padding: 0 8px 16px; overflow-y: auto; flex: 1; min-height: 0; }
 .item { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 10px 12px; text-align: left; background: transparent; border: 0; border-radius: 10px; cursor: pointer; position: relative; }
 .item:hover { background: var(--track); }
@@ -71,6 +81,12 @@ a.btn { display: inline-block; text-decoration: none; color: inherit; }
 .base { position: absolute; top: 10px; left: 56px; z-index: 1000; display: flex; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5); }
 .base button { padding: 6px 12px; background: rgba(20, 25, 34, 0.9); border: 0; cursor: pointer; font-size: 14px; }
 .base button[aria-pressed="true"] { background: var(--accent); color: #04121c; font-weight: 600; }
+.recentre { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); z-index: 1000; padding: 7px 14px; border: 0; border-radius: 16px; background: var(--accent); color: #04121c; font: 600 14px var(--font); cursor: pointer; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5); }
+.recentre[hidden], .limit-sign[hidden] { display: none; }
+.limit-sign { position: absolute; right: 10px; bottom: 34px; z-index: 1000; width: 52px; height: 52px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border: 6px solid #d8232a; border-radius: 50%; background: #fff; color: #111; font: 700 21px/1 var(--font); box-shadow: 0 1px 5px rgba(0, 0, 0, 0.5); }
+.limit-sign.over { background: #ffd9d9; animation: sign-flash 0.8s ease-in-out infinite alternate; }
+@keyframes sign-flash { to { border-color: #7d0b10; } }
+@media (prefers-reduced-motion: reduce) { .limit-sign.over { animation: none; } }
 .legend { position: absolute; left: 10px; bottom: 26px; z-index: 1000; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 8px; background: rgba(20, 25, 34, 0.85); font-size: 12px; }
 .ramp { display: flex; width: 90px; height: 8px; border-radius: 4px; overflow: hidden; }
 .ramp span { flex: 1; }

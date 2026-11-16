@@ -782,6 +782,33 @@ class HttpChangeTests(unittest.IsolatedAsyncioTestCase):
             titles = {t["id"]: t["title"] for t in (await r.json())["trips"]}
         self.assertEqual(titles[self.tid], "Coast run")
 
+    async def test_star_then_read_it_back_and_unstar(self):
+        async with self.http.get(f"{self.base}/api/triplog/{self.tid}") as r:
+            self.assertFalse((await r.json())["starred"])  # (not starred to begin with)
+        async with self.http.patch(f"{self.base}/api/triplog/{self.tid}", json={"starred": True}, headers=self.h) as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(await r.json(), {"ok": True, "starred": True})
+        async with self.http.get(f"{self.base}/api/triplog/{self.tid}") as r:
+            self.assertTrue((await r.json())["starred"])
+        async with self.http.get(f"{self.base}/api/triplog") as r:
+            self.assertTrue({t["id"]: t["starred"] for t in (await r.json())["trips"]}[self.tid])
+        # naming and starring do not disturb each other, and the last star line wins
+        async with self.http.patch(f"{self.base}/api/triplog/{self.tid}", json={"name": "Coast run", "starred": False}, headers=self.h) as r:
+            self.assertEqual(await r.json(), {"ok": True, "title": "Coast run", "starred": False})
+        item = {t["id"]: t for t in self.log.list()}[self.tid]
+        self.assertEqual((item["starred"], item["title"]), (False, "Coast run"))
+        self.assertFalse(self.log.read(self.tid)["starred"])
+
+    async def test_star_needs_a_real_boolean_and_something_to_change(self):
+        url = f"{self.base}/api/triplog/{self.tid}"
+        for body in ({"starred": "yes"}, {"starred": 1}, {}, {"other": 1}):
+            async with self.http.patch(url, json=body, headers=self.h) as r:
+                self.assertEqual(r.status, 400, body)
+        async with self.http.patch(url, json={"starred": True}) as r:
+            self.assertEqual(r.status, 403)  # (no write header)
+        async with self.http.patch(f"{self.base}/api/triplog/20200101T000000Z", json={"starred": True}, headers=self.h) as r:
+            self.assertEqual(r.status, 404)
+
     async def test_changes_need_the_write_header(self):
         async with self.http.patch(f"{self.base}/api/triplog/{self.tid}", json={"name": "x"}) as r:
             self.assertEqual(r.status, 403)

@@ -404,20 +404,27 @@ async def export_triplog_trip(request):
 
 
 async def rename_triplog_trip(request):
-    """Give an ended trip a name: {"name": "..."} (an empty name takes it away)."""
+    """Change an ended trip: {"name": "..."} gives it a name (an empty name takes it away), {"starred": true|false} marks it as a
+    favourite or not. Either or both."""
     log = request.app[TRIPLOG]
     body = await _body(request)
     if log is None or not isinstance(body, dict):
         return _error(404, "there is no such trip")
+    if "name" not in body and "starred" not in body:
+        return _error(400, 'give a "name" or "starred"')
+    reply = {"ok": True}
     try:
-        title = log.rename(request.match_info["id"], body.get("name"))
+        if "name" in body:
+            reply["title"] = log.rename(request.match_info["id"], body.get("name"))
+        if "starred" in body:
+            reply["starred"] = log.star(request.match_info["id"], body.get("starred"))
     except TripNotFound:
         return _error(404, "there is no such trip")
     except Busy:
         return _error(409, "this trip is still being recorded")
     except ValueError as e:
         return _error(400, str(e))
-    return web.json_response({"ok": True, "title": title})
+    return web.json_response(reply)
 
 
 async def delete_triplog_trip(request):

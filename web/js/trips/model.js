@@ -219,6 +219,37 @@ export function tripTitle(trip) {
   return trip.title || trip.stats?.name || "Trip";
 }
 
+/** The trips whose text contains every word of `query` (any case, any order). `text(trip)` gives the words a trip can be found by:
+ * its name, vehicle and date, as the list shows them. An empty query keeps every trip. */
+export function filterTrips(trips, query, text) {
+  const words = String(query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return trips;
+  return trips.filter((trip) => {
+    const hay = String(text(trip)).toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/** What the trips of the last `days` days add up to, for the line at the top of the list: {count, distance (m), duration (s)}.
+ * A trip counts by when it began. Trips with no distance yet count as zero metres. */
+export function recentTotals(trips, nowMs = Date.now(), days = 7) {
+  const since = nowMs / 1000 - days * 86400;
+  let count = 0, distance = 0, duration = 0;
+  for (const t of trips) {
+    if (!(t.ts >= since)) continue;
+    count++;
+    distance += Number.isFinite(t.distance) ? t.distance : 0;
+    duration += Number.isFinite(t.duration) ? t.duration : 0;
+  }
+  return { count, distance, duration };
+}
+
+/** The browser tab's title: the page's own, with a mark in front while a trip is being recorded, so a window hidden behind the game
+ * still shows in the taskbar that it is recording. */
+export function tabTitle(base, recording) {
+  return recording ? `\u25CF Recording: ${base}` : base;
+}
+
 /** True when two reads of the same trip hold nothing different (so the page need not redraw): same points, notes, events, end and name. */
 export function sameTrip(a, b) {
   if (!a || !b || a.header?.id !== b.header?.id) return false;

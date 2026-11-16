@@ -32,7 +32,11 @@ A name the user gives a trip is one more line appended after the end line (the l
 
     {"k":"name","name":"Sunday run to the coast"}
 
-so renaming never rewrites the file. A deleted trip is moved to the "trash" folder inside the trip log folder, not erased.
+and marking a trip as a favourite is another (the last one wins; false takes the mark away):
+
+    {"k":"star","v":true}
+
+so renaming and starring never rewrite the file. A deleted trip is moved to the "trash" folder inside the trip log folder, not erased.
 """
 import json
 import math
@@ -553,8 +557,8 @@ class TripLog:
             head = json.loads(first)
             if not isinstance(head, dict) or head.get("k") != "trip":
                 return None
-            out = {"id": head["id"], "ts": head.get("ts", 0), "vehicle": head.get("vehicle"), "energy": head.get("energy"), "ended": False, "title": None}
-            titled = False
+            out = {"id": head["id"], "ts": head.get("ts", 0), "vehicle": head.get("vehicle"), "energy": head.get("energy"), "ended": False, "title": None, "starred": False}
+            titled = starred = False
             for raw in reversed(tail):
                 try:
                     obj = json.loads(raw)
@@ -566,6 +570,11 @@ class TripLog:
                     if not titled:  # (the last name line is the one that counts)
                         titled = True
                         out["title"] = obj.get("name") if isinstance(obj.get("name"), str) and obj.get("name") else None
+                    continue
+                if obj.get("k") == "star":
+                    if not starred:  # (the last star line is the one that counts)
+                        starred = True
+                        out["starred"] = obj.get("v") is True
                     continue
                 if obj.get("k") == "end":
                     out.update(ended=True, reason=obj.get("reason"), duration=obj.get("t"), distance=obj.get("dist"), top=obj.get("top"), points=obj.get("n"))
@@ -598,15 +607,28 @@ class TripLog:
         Raises NotFound, Busy, or ValueError for a name that is not text."""
         path = self._path_of(trip_id)
         title = clean_name(name)
+        self._append(path, {"k": "name", "name": title})
+        return title or None
+
+    def star(self, trip_id, starred):
+        """Mark an ended trip as a favourite, or take the mark away. Like a name, it is a line added to the end of the file (the last
+        one counts), so nothing is rewritten. Returns the state as stored. Raises NotFound, Busy, or ValueError for a non-boolean."""
+        if not isinstance(starred, bool):
+            raise ValueError("starred must be true or false")
+        self._append(self._path_of(trip_id), {"k": "star", "v": starred})
+        return starred
+
+    @staticmethod
+    def _append(path, line):
+        """Add one line to the end of an ended trip's file."""
         with open(path, "a+b") as f:
             f.seek(0, 2)
             size = f.tell()
             if size:
                 f.seek(size - 1)
-                if f.read(1) != b"\n":  # (a half-written last line: start the name on a fresh one)
+                if f.read(1) != b"\n":  # (a half-written last line: start ours on a fresh one)
                     f.write(b"\n")
-            f.write((json.dumps({"k": "name", "name": title}, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8"))
-        return title or None
+            f.write((json.dumps(line, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8"))
 
     def delete(self, trip_id):
         """Move an ended trip to the trash folder. Raises NotFound or Busy."""
@@ -704,7 +726,7 @@ class TripLog:
         try:
             if path.stat().st_size > _MAX_READ_BYTES:
                 return None
-            out = {"header": None, "points": [], "info": [], "events": [], "end": None, "title": None}
+            out = {"header": None, "points": [], "info": [], "events": [], "end": None, "title": None, "starred": False}
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     try:
@@ -724,6 +746,8 @@ class TripLog:
                         out["end"] = obj
                     elif kind == "name":
                         out["title"] = obj.get("name") if isinstance(obj.get("name"), str) and obj.get("name") else None
+                    elif kind == "star":
+                        out["starred"] = obj.get("v") is True
             return out if out["header"] is not None else None
         except OSError:
             return None
