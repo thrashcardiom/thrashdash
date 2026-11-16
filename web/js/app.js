@@ -18,6 +18,8 @@ const widgetsEl = document.getElementById("widgets");
 const overlayTitle = document.getElementById("overlay-title");
 const overlayDetail = document.getElementById("overlay-detail");
 const editButton = document.getElementById("edit-button");
+const tripsButton = document.getElementById("trips-button");
+const quitButton = document.getElementById("quit-button");
 const controls = document.getElementById("top-controls");
 
 /** Everything this page knows: which layout is shown, units, and the latest data from the relay. */
@@ -157,6 +159,7 @@ function showLoaded(result) {
   render(result.layout);
   controls.hidden = false;
   editButton.hidden = !app.client.local; // a phone or tablet on the network can look, not edit
+  quitButton.hidden = !app.client.local; // ... and cannot stop ThrashDash either
   if (app.client.local) startReporting(); // (does nothing if already started)
   windowReporter.notify();
 }
@@ -296,6 +299,31 @@ async function startEditing() {
 }
 
 editButton.addEventListener("click", startEditing);
+tripsButton.addEventListener("click", () => openTripsWindow()); // (a phone can browse trips too, so unlike Edit and Quit it is not local-only)
+
+/** Quit ThrashDash. It asks once more first (like Delete does), because the button sits right beside Edit. */
+let quitSure = false;
+quitButton.addEventListener("click", async () => {
+  if (!quitSure) {
+    quitSure = true;
+    quitButton.textContent = "Really quit?";
+    setTimeout(() => {
+      quitSure = false;
+      if (!quitButton.disabled) quitButton.textContent = "Quit";
+    }, 4000);
+    return;
+  }
+  quitButton.disabled = true;
+  quitButton.textContent = "Quitting\u2026";
+  try {
+    await api.quit();
+  } catch (e) {
+    quitButton.disabled = false;
+    quitButton.textContent = "Quit";
+    quitSure = false;
+    console.warn("ThrashDash: could not quit", e);
+  }
+});
 
 /** True if this window was set to one dashboard (its address has ?d=), so it does not follow vehicle rules. */
 const isPinned = () => new URLSearchParams(location.search).has("d");
@@ -396,7 +424,6 @@ const switcher = createSwitcher({
   pinned: isPinned,
   follow: unpinAndFollow,
   openWindow: (id) => openDashboardWindow(id, { menu: true }), // the same size as this window, with the menu open to pick what it should show
-  openTrips: openTripsWindow, // the Trips (map) window, which ThrashDash remembers like a dashboard window
   onToggle: (open) => {
     if (open) wakeControls();
   },
@@ -417,6 +444,9 @@ document.addEventListener("keydown", (e) => {
     if (!app.client.local) return; // opening windows is for the computer running ThrashDash
     e.preventDefault();
     openDashboardWindow(app.id, { menu: true });
+  } else if (key === "t" && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    openTripsWindow();
   } else if (key === "s" && !e.ctrlKey && !e.metaKey && app.layout) {
     e.preventDefault();
     const next = SKIN_CHOICES[(SKIN_CHOICES.indexOf(skinFor()) + 1) % SKIN_CHOICES.length];

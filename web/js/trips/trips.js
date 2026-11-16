@@ -10,7 +10,7 @@ import { buildPrefs, resolveUnit } from "../units.js";
 import { createWindowReporter, ensureWindowId } from "../windowState.js";
 import { applySavedPlacement } from "../windowPlace.js";
 import { formatDuration } from "../economy.js";
-import { RAMP, REPLAY_RATES, advanceLive, interpolateFeed, liveReadout, nextAutoOpen, WHEN_OPTIONS, advanceReplay, clockText, colourScaleTop, filterOptions, filterRoutes, overviewTiles, routesBounds, turnToward, clampMapHeight, MAP_STEP_PX, distanceText, graphModel, replayReadout, routeRuns, sameTrip, sampleAtDistance, speedText, statTiles, tripTitle } from "./model.js";
+import { RAMP, REPLAY_RATES, advanceLive, interpolateFeed, liveReadout, nextAutoOpen, WHEN_OPTIONS, advanceReplay, clockText, colourScaleTop, filterOptions, filterRoutes, overviewTiles, routesBounds, turnToward, clampMapHeight, MAP_STEP_PX, distanceText, graphModel, replayReadout, limitAt, routeRuns, sameTrip, sampleAtDistance, speedText, statTiles, tripTitle, filterTrips, tabTitle, recentTotals } from "./model.js";
 
 const LIVE_MS = 3000; // while a trip is being recorded (or open and not finished), the page re-reads it this often
 const IDLE_TICKS = 1; // with nothing being recorded it only looks every IDLE_TICKS * LIVE_MS, to notice a new trip (the list is cheap to read)
@@ -51,7 +51,9 @@ const stored = (key) => {
     return null; // (a page that may not keep anything, such as one shown in a sandbox)
   }
 };
-const state = { trips: [], enabled: true, selected: null, detail: null, client: { local: false }, prefs: buildPrefs({}, location.search), recording: false };
+const state = { trips: [], enabled: true, selected: null, detail: null, client: { local: false }, prefs: buildPrefs({}, location.search), recording: false, query: "", starredOnly: false };
+const BASE_TITLE = document.title; // (a shared page has its own title; a recording is marked in front of whichever it is)
+let selectSeq = 0; // the newest request to open a trip: an older one that arrives later is dropped, so stepping quickly through the list ends on the last
 let map = null;
 let baseLayer = null;
 let trackLayer = null;
@@ -85,18 +87,35 @@ const when = (ts) => new Date(ts * 1000).toLocaleString(undefined, { dateStyle: 
 
 // ---- the list --------------------------------------------------------------------------------------------------------
 
+/** What a trip can be found by when searching the list: its name, its vehicle, and its date as shown. */
+const searchText = (trip) => [tripTitle(trip.id === state.selected && state.detail && !trip.stats ? { ...trip, stats: state.detail.stats } : trip), trip.vehicle, when(trip.ts)].join(" ");
+
 function renderList() {
   const list = $("list");
+  const hadFocus = list.contains(document.activeElement) ? document.activeElement.dataset.id : null; // (the list is redrawn every few seconds: keyboard focus must survive it)
   list.replaceChildren();
-  $("count").textContent = state.trips.length ? `${state.trips.length} ${state.trips.length === 1 ? "trip" : "trips"}` : "";
+  const shown = filterTrips(state.starredOnly ? state.trips.filter((t) => t.starred) : state.trips, state.query, searchText);
+  const searching = Boolean(state.query.trim()) || state.starredOnly;
+  $("search").hidden = !state.trips.length;
+  $("starred-row").hidden = !state.trips.some((t) => t.starred) && !state.starredOnly; // (nothing to filter by until a trip has been starred)
+  $("count").textContent = !state.trips.length ? "" : searching ? `${shown.length} of ${state.trips.length}` : `${state.trips.length} ${state.trips.length === 1 ? "trip" : "trips"}`;
+  const week = recentTotals(state.trips);
+  const totals = $("totals");
+  totals.hidden = week.count === 0;
+  if (week.count) {
+    const d = distanceText(week.distance, state.prefs);
+    totals.textContent = `Last 7 days: ${week.count} ${week.count === 1 ? "trip" : "trips"} \u00B7 ${d.value} ${d.label} \u00B7 ${formatDuration(week.duration)}`;
+  }
   const empty = $("empty");
-  empty.hidden = state.trips.length > 0;
+  empty.hidden = shown.length > 0;
   if (!state.trips.length) {
     empty.textContent = state.enabled
       ? "No trips yet. Drive in BeamNG.Earth with ThrashDash running and each drive appears here."
       : "The trip log is switched off in this run of ThrashDash (it is not kept in --simulate mode).";
+  } else if (!shown.length) {
+    empty.textContent = state.query.trim() ? "No trip matches that search." : "No trip is starred yet.";
   }
-  for (const trip of state.trips) {
+  for (const trip of shown) {
     const li = h("li", "", list);
     const b = h("button", "item", li);
     b.type = "button";
@@ -104,14 +123,61 @@ function renderList() {
     b.setAttribute("aria-current", trip.id === state.selected ? "true" : "false");
     // (a trip still being recorded has no stored summary, so the one worked out for the open trip stands in for its name)
     const known = trip.id === state.selected && state.detail && !trip.stats ? { ...trip, stats: state.detail.stats } : trip;
-    h("span", "item-title", b, tripTitle(known));
+    const title = h("span", "item-title", b);
+    if (trip.starred) h("span", "star", title, "\u2605").setAttribute("aria-label", "Starred");
+    h("span", "", title, tripTitle(known));
     const bits = [when(trip.ts)];
     if (trip.distance != null) bits.push(distanceString(trip.distance));
     if (trip.duration != null) bits.push(formatDuration(trip.duration));
     h("span", "item-sub muted", b, bits.join(" · "));
     if (trip.recording) h("span", "badge", b, "Recording");
     b.addEventListener("click", () => select(trip.id));
+    if (trip.id === hadFocus) b.focus({ preventScroll: true });
   }
+}
+
+/** The search box and the arrow keys. Typing narrows the list; Down from the box goes to the first trip; in the list Up and Down
+ * move to the previous or next trip and open it (Home and End go to the first and last), and Escape in the box clears it. */
+function wireList() {
+  $("starred-only").addEventListener("change", () => {
+    state.starredOnly = $("starred-only").checked;
+    renderList();
+  });
+  const search = $("search");
+  search.addEventListener("input", () => {
+    state.query = search.value;
+    renderList();
+  });
+  search.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && search.value) {
+      e.preventDefault();
+      search.value = "";
+      state.query = "";
+      renderList();
+    } else if (e.key === "ArrowDown") {
+      const first = $("list").querySelector(".item");
+      if (first) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  });
+  $("list").addEventListener("keydown", (e) => {
+    const items = [...$("list").querySelectorAll(".item")];
+    const at = items.indexOf(document.activeElement);
+    if (at < 0 || e.ctrlKey || e.altKey || e.metaKey) return;
+    const to = { ArrowDown: Math.min(at + 1, items.length - 1), ArrowUp: Math.max(at - 1, 0), Home: 0, End: items.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    if (e.key === "ArrowUp" && at === 0 && !$("search").hidden) {
+      $("search").focus();
+      return;
+    }
+    if (to !== at) {
+      items[to].focus();
+      select(items[to].dataset.id);
+    }
+  });
 }
 
 const distanceString = (m) => {
@@ -127,6 +193,7 @@ async function loadList() {
     state.recording = Boolean(data.status?.recording);
     const live = $("live");
     live.hidden = !state.recording;
+    document.title = tabTitle(BASE_TITLE, state.recording);
     if (state.recording) live.textContent = `Recording now: ${distanceString(data.status.distance)}`;
   } catch (e) {
     state.trips = [];
@@ -140,6 +207,7 @@ async function loadList() {
 // ---- one trip --------------------------------------------------------------------------------------------------------
 
 async function select(id, { refit = true } = {}) {
+  const mine = ++selectSeq;
   let trip;
   try {
     trip = await api.getTrip(id);
@@ -147,6 +215,7 @@ async function select(id, { refit = true } = {}) {
     if (state.selected === id) showNothing();
     return;
   }
+  if (mine !== selectSeq) return; // (something newer was asked for while this was being read)
   show(trip, refit);
 }
 
@@ -213,6 +282,8 @@ function drawHeader() {
   $("subtitle").textContent = bits.join(" · ");
   const recording = !trip.end;
   $("actions").hidden = !state.client.local || recording;
+  $("star").textContent = trip.starred ? "\u2605 Starred" : "\u2606 Star";
+  $("star").setAttribute("aria-pressed", trip.starred ? "true" : "false");
   const id = encodeURIComponent(trip.header.id);
   $("export-gpx").href = `/api/triplog/${id}/gpx`;
   $("export-kml").href = `/api/triplog/${id}/kml`;
@@ -240,6 +311,29 @@ function ensureMap() {
   map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener noreferrer">Leaflet</a>');
   trackLayer = L.layerGroup().addTo(map);
   setBase(currentBase);
+  map.on("moveend", updateRecentre);
+  $("recentre").addEventListener("click", () => {
+    if (!replay.marker || !map) return;
+    $("follow").checked = true; // (centring on a car that is driving away would not last: it follows as well)
+    map.setView(replay.marker.getLatLng(), map.getZoom(), { animate: true });
+  });
+}
+
+/** The "Re-centre" button shows only while the car is on its way but off the part of the map you are looking at. */
+function updateRecentre() {
+  $("recentre").hidden = !(map && replay.marker && !rotation.on && !map.getBounds().contains(replay.marker.getLatLng()));
+}
+
+/** The posted speed limit where the car is, as a road sign on the map; red and flashing while the car is over it. `ms`: the limit in
+ * metres per second, or null when none is posted there (a limit the game only guessed is never shown, as it is never counted). */
+function drawLimitSign(ms, over) {
+  const sign = $("limit-sign");
+  sign.hidden = ms === null;
+  if (ms === null) return;
+  const l = speedText(ms, state.prefs);
+  sign.firstChild.textContent = l.value;
+  sign.setAttribute("aria-label", `Speed limit ${l.value} ${l.label}`);
+  sign.classList.toggle("over", Boolean(over));
 }
 
 function tileLayerFor(name) {
@@ -469,6 +563,8 @@ function renderReplay(dt) {
     if (rotation.on) exitRotation(true);
     if (replay.marker && map) map.removeLayer(replay.marker);
     replay.marker = null;
+    drawLimitSign(null);
+    updateRecentre();
     graphRef?.rule.setAttribute("visibility", "hidden");
     return;
   }
@@ -491,6 +587,9 @@ function renderReplay(dt) {
   const turn = rotation.on ? rotation.bearing : shown.here.h;
   if (arrow && Number.isFinite(turn)) arrow.style.transform = `rotate(${turn}deg)`;
   if (map && !rotation.on && $("follow").checked && !map.getBounds().pad(-0.25).contains(at)) map.setView(at, map.getZoom(), { animate: false });
+  const limitT = live ? state.detail.points[state.detail.points.length - 1]?.t : replay.t;
+  drawLimitSign(limitT === undefined ? null : limitAt(state.detail, limitT), shown.over);
+  updateRecentre();
   if (graphRef) {
     const x = graphRef.g.x(shown.here.d);
     graphRef.rule.setAttribute("x1", x);
@@ -917,6 +1016,52 @@ function setupMapSize() {
 
 // ---- renaming and deleting ---------------------------------------------------------------------------------------------
 
+/** Quit ThrashDash from this window (this computer only; a dashboard window has the same button). It asks again first. */
+function setupQuit() {
+  const button = $("quit");
+  button.hidden = !state.client.local || EMBED || SHARED;
+  let sure = false;
+  button.addEventListener("click", async () => {
+    if (!sure) {
+      sure = true;
+      button.textContent = "Really quit?";
+      setTimeout(() => {
+        sure = false;
+        if (!button.disabled) button.textContent = "Quit";
+      }, 4000);
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Quitting\u2026";
+    try {
+      await api.quit();
+    } catch (e) {
+      button.disabled = false;
+      button.textContent = "Quit";
+      sure = false;
+      console.warn("ThrashDash: could not quit", e);
+    }
+  });
+}
+
+/** Mark the open trip as a favourite, or take the mark off. */
+async function toggleStar() {
+  const trip = state.detail;
+  if (!trip || !trip.end) return;
+  const next = !trip.starred;
+  try {
+    await api.starTrip(trip.header.id, next);
+  } catch (e) {
+    $("subtitle").textContent = `Could not star: ${e.message}`;
+    return;
+  }
+  trip.starred = next;
+  const item = state.trips.find((t) => t.id === trip.header.id);
+  if (item) item.starred = next;
+  drawHeader();
+  renderList();
+}
+
 function startRename() {
   const trip = state.detail;
   const title = $("title");
@@ -1117,8 +1262,11 @@ async function start() {
   setupHeadUp();
   setupMapSize();
   setupOverview();
+  wireList();
   setupPopups(settingsLoaded);
   reportAsWindow();
+  setupQuit();
+  $("star").addEventListener("click", toggleStar);
   $("rename").addEventListener("click", startRename);
   $("delete").addEventListener("click", askDelete);
   window.addEventListener("resize", () => {

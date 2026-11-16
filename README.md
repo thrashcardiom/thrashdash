@@ -106,7 +106,7 @@ The AppImage is one file that contains the program, Python and the pages. Thrash
 
 Things to know about the AppImage:
 
-- **It quits by itself** when you close the last window, and there is a **Quit ThrashDash** button in the Dashboards menu. (Phones looking at the pages do not keep it running.) If no window ever opens, it quits after about a minute and a half rather than running unseen.
+- **It quits by itself** when you close the last window, and there is a **Quit** button next to **Edit** (move the mouse over a dashboard window and it appears). (Phones looking at the pages do not keep it running.) If no window ever opens, it quits after about a minute and a half rather than running unseen.
 - **Messages** go to `thrashdash.log` in [the data folder](docs/reference.md#where-things-are-stored) when it is started from a desktop (only the latest run is kept), and to the terminal when started from one.
 - **No Chromium-based browser?** ThrashDash opens your default browser instead. It works there too, in an ordinary window rather than a borderless one.
 - It needs FUSE to run, like all AppImages. If it will not start, try `./ThrashDash-0.1.0-x86_64.AppImage --appimage-extract-and-run`, or install FUSE 2 (`libfuse2`).
@@ -202,7 +202,7 @@ Then, for real:
 1. Install the mod once (see [Installation](#installation)), restart the game, and spawn your car.
 2. Start BeamNG, start BeamNG.Earth, and load its level.
 3. Start ThrashDash: run the AppImage, or from the source `.venv/bin/python relay/run.py`. A dashboard window opens.
-4. Move the mouse over the window and click **Dashboards**, then **Open the trip log**. The Trips window opens.
+4. Move the mouse over the window and click **Trips** (beside **Edit**, top right). The Trips window opens.
 5. Drive. After a few seconds the Trips page opens the new trip by itself and the car moves along the map. Stop, teleport or leave the level and the trip is finished: it appears in the list with its name and figures, and a message tells you in the game.
 
 ## The trip log
@@ -242,7 +242,15 @@ The summary is worked out again whenever its rules change, so every old trip ben
 
 ## The Trips page
 
-Open it from the Dashboards menu (**Open the trip log**), or go to `http://127.0.0.1:8765/trips`. A phone on your network opens the same address with the PIN. The list of trips is on the left (one screen at a time on a phone); the one you pick is on the right. **Recording now** shows while a trip is being driven.
+Open it with the **Trips** button at the top right of a dashboard window (move the mouse over the window to see it), or press **T** on a dashboard, or go to `http://127.0.0.1:8765/trips`. A phone on your network opens the same address with the PIN. The list of trips is on the left (one screen at a time on a phone); the one you pick is on the right. **Recording now** shows while a trip is being driven, and the browser tab's title says **Recording** too, so a window hidden behind the game still shows it in the taskbar.
+
+### Finding a trip
+
+- **Last 7 days** at the top of the list adds up the trips, distance and driving time of the past week.
+- **Search** (above the list) narrows it to the trips whose name, vehicle or date contain every word you type, in any order. **Esc** clears it.
+- **Star** a trip (the button beside its name) to mark it as a favourite; it gets a star in the list, and **Starred only** appears above the list to show just those. The mark is a line added to the trip's file, like a name.
+- **Arrow keys:** **Down** from the search box goes to the first trip, then **Up** and **Down** step through the trips and open each one (**Home** and **End** go to the first and last).
+- **Quit** (at the top of the list, this computer only) stops ThrashDash from the Trips window, with an extra click to confirm.
 
 ### The map
 
@@ -269,6 +277,8 @@ The bar under the map drives the route again with a car marker pointing the way 
 
 - **New trips open by themselves.** When a trip starts, the page opens it and takes the map there, once per trip so you can look elsewhere afterwards. A window hidden behind the game notices at once, because the relay tells the page the moment a trip file is made. Untick **Open new trips automatically** above the list to stop it. It does not jump while you are typing a name, and the **All trips** map only adds the new trip in green without switching away.
 - **The car is shown as the game reports it**: the game sends its position ten times a second, the page draws it about a tenth of a second behind the newest one and smooths between them, so it keeps up with the game's own minimap. (If no live positions are arriving, it falls back to the recorded points, about two seconds behind.)
+- **The speed limit** where the car is shows as a road sign in the corner of the map, but only where the limit is a posted one. It flashes red while the car is over it.
+- **Re-centre on the car** appears if you have moved the map so the car is out of view; it centres the map on the car and follows it again.
 - **Follow or heading up** works on it as in a replay. **Pause**, the slider or the space bar leaves the live view to look at something, and **Go live** comes back. When the trip ends the car finishes the stretch it has not yet shown.
 - A trip that turns out too short to keep (a nudge) is dropped from the page when it goes.
 
@@ -280,7 +290,7 @@ The **All trips** button above the list draws every trip's route on one map (thi
 
 ### Rename and delete
 
-**Rename** keeps your name as a line added to the trip's file (nothing is rewritten). **Delete** moves the file into a `trash` folder inside `triplog/`; nothing is erased, so a trip can be put back by moving the file out. Both work only on the computer running ThrashDash, like every change; a phone can look but not change.
+**Rename** keeps your name, and **Star** keeps its mark, as lines added to the trip's file (nothing is rewritten). **Delete** moves the file into a `trash` folder inside `triplog/`; nothing is erased, so a trip can be put back by moving the file out. Both work only on the computer running ThrashDash, like every change; a phone can look but not change.
 
 ### A live map on a dashboard
 
@@ -306,7 +316,7 @@ ThrashDash can run several windows at once: a dashboard in each (on different mo
 
 - **They reopen as you left them.** Every window tells ThrashDash which page it shows and how big it is. Next start, the windows that were open come back. Switch it off with **Reopen my windows when ThrashDash starts** in the editor, under **Windows**.
 - **Window config.** The **Window config** section of the Dashboards menu saves the windows open now, the dashboards **and the map window**, each with its size and (where the system reports one) its place, as a named set. **Save** overwrites the config that is loaded; **Save as…** asks for a name and makes a new one (the same way the dashboard editor saves); **Delete** removes the loaded one. The menu says when the windows have changed since the save, and which config Save would overwrite. The config last saved or picked is the one **opened when ThrashDash starts**; with none saved, the windows open last time reopen as before. Picking a config while ThrashDash runs makes it the one that opens and opens its windows that are not open yet (a window that is open stays: ThrashDash cannot close another program's window). What a dashboard window *shows*, its gauges and live map, is saved with the dashboard itself, in the editor.
-- **Quit.** **Quit ThrashDash** at the foot of the Dashboards menu stops ThrashDash (it asks again first). Pressing Ctrl-C does the same.
+- **Quit.** The **Quit** button next to **Edit** (top right of a dashboard window, shown when you move the mouse) stops ThrashDash. It asks again first, because it sits beside Edit. Pressing Ctrl-C does the same.
 - **Closing ThrashDash closes its windows**, and they stay remembered so they come back next time. Switch it off with **Close my windows when ThrashDash closes** (editor, **Windows**); the windows then stay open, show that ThrashDash has gone, and reconnect when it is back. Phones are never closed. A page in an ordinary browser tab cannot be closed by a page, so it just shows that ThrashDash has stopped.
 - **Positions.** Size and page are always restored. *Where* a window goes depends on the system. On Windows, and on Linux under X11, positions are saved and restored. Under **Linux with Wayland** a program cannot place its own windows or read where they are, so the desktop decides. Tick **Place windows exactly** (editor, **Windows**) to run the windows in X11 compatibility mode (`--ozone-platform=x11`, through XWayland): positions are then saved, and each window moves and sizes itself to its own remembered place as it opens. It is off by default because XWayland can look softer on scaled displays.
 
@@ -395,7 +405,7 @@ Useful command-line options (the full list is in the reference): `--simulate` (f
 | Windows says "Windows protected your PC" | The program is not code-signed. *More info*, then *Run anyway*, or check the zip against the checksum on the Releases page. |
 | On Windows nothing seems to happen when I double-click `thrashdash.exe` | It has no console window. Look at `thrashdash.log` in `%LOCALAPPDATA%\ThrashDash`. For commands that print something, use `thrashdash-cli.exe`. |
 | The AppImage will not start | AppImages need FUSE. Try `./ThrashDash-...AppImage --appimage-extract-and-run`, or install `libfuse2`. Make sure the file is executable (`chmod +x`). |
-| The AppImage quit and I did not want it to | It ends when the last window closes, or when you press **Quit ThrashDash**. Keep one open, or run from the source, which keeps running until you stop it. |
+| The AppImage quit and I did not want it to | It ends when the last window closes, or when you press **Quit**. Keep one open, or run from the source, which keeps running until you stop it. |
 | A phone shows the PIN page | That is the PIN doing its job: enter the PIN shown in the Dashboards menu on the computer, or scan the QR code there. A sign-in lasts 30 days, and changing the PIN signs every phone out. |
 | A phone shows "unable to connect" | Is network access switched on, are both devices on the same network, and does the computer's firewall let the port through? That last one is for the computer's administrator. |
 | An imported dashboard is refused | The message names the property at fault. Layouts must be `format: 1` and within the [limits](docs/dashboards.md#the-layout-format). |

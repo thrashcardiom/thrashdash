@@ -123,7 +123,7 @@ The relay serves the dashboard and a small JSON API on `http://127.0.0.1:8765`. 
 | `GET /api/triplog/{id}/share` | A finished trip as one self-contained html page (see Share above). 409 while it is being recorded. |
 | `GET /api/triplog/{id}/gpx`, `/kml` | The trip as a download (GPX 1.1, or KML with the route as a line on the ground, a pin at each end and a hidden timed `gx:Track`). 404 for an unknown trip or kind. |
 | `GET /api/triplog/{id}` | One trip in full: `{header, points, info, events, end, title, stats}` (`title` is the name the user gave it, or null; `stats.limits` also has `spans` and `posted` here, the time ranges over the limit and where a posted limit was read). 404 for an unknown or malformed id. |
-| `PATCH /api/triplog/{id}` | Rename an ended trip: `{"name": "..."}` (an empty name takes it away; at most 80 characters). 409 while it is being recorded. This computer only. |
+| `PATCH /api/triplog/{id}` | Change an ended trip: `{"name": "..."}` renames it (an empty name takes it away; at most 80 characters), `{"starred": true}` marks it as a favourite (`false` takes the mark away); either or both. 409 while it is being recorded. This computer only. |
 | `DELETE /api/triplog/{id}` | Move an ended trip to the trash folder. 409 while it is being recorded. This computer only. |
 | `GET /api/windows` | The remembered windows and which are open now. |
 | `PUT /api/windows/{id}` | A window reports itself (used by the dashboard). |
@@ -202,6 +202,7 @@ A trip is one JSON Lines file in `triplog/` (one JSON object per line, so a cras
 {"k":"e","t":30.2,"name":"routeArrived","la":..,"lo":..}
 {"k":"end","reason":"idle","t":601.0,"ts":1794601501,"dist":8123.4,"top":31.2,"n":412,"sum":{...}}
 {"k":"name","name":"Sunday run to the coast"}
+{"k":"star","v":true}
 ```
 
 | Line | Meaning |
@@ -212,6 +213,7 @@ A trip is one JSON Lines file in `triplog/` (one JSON object per line, so a cras
 | `e` | An event: `reset` (the R key), `routeArrived`, `worldReady`. Events that end a trip (`teleported`, `vehicleSwitched`, `levelEnd`) end it instead. |
 | `end` | The closing line: why it ended (`idle`, `teleport`, `jump`, `vehicle`, `level`, `lost`, `shutdown`, `interrupted`), duration, distance, top speed, number of points, and `sum`, the summary worked out once (and worked out again whenever its rules change). |
 | `name` | A name the user gave the trip, appended after the end line (the last one wins; an empty one clears it). Renaming never rewrites the file. |
+| `star` | `{"k":"star","v":true}` marks the trip as a favourite, `false` takes the mark away; appended after the end line like a name (the last one wins). |
 
 A trip that was open when ThrashDash stopped has no `end` line; the next start ends it as `interrupted`. A deleted trip is moved to `triplog/trash/`, not erased.
 

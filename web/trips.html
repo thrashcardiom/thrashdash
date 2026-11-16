@@ -17,8 +17,10 @@
         <h1>Trips</h1>
         <span id="count" class="muted"></span>
         <button id="all" class="btn small" type="button" aria-pressed="false" title="Every trip drawn on one map">All trips</button>
+        <button id="quit" class="btn small quit" type="button" title="Stop ThrashDash. Its windows close with it (they come back next time it starts)" hidden>Quit</button>
       </header>
       <p id="live" class="live" hidden></p>
+      <p id="totals" class="totals muted" hidden></p>
       <label class="auto" title="When a new trip starts, open it and show it on the map"><input id="auto-open" type="checkbox" checked> Open new trips automatically</label>
       <details id="popups" class="popups">
         <summary>Popups and settings</summary>
@@ -36,6 +38,8 @@
         <button id="pop-test" class="btn small" type="button" title="Sends a popup now to the game and the dashboard windows, whatever is ticked above">Send a test popup</button>
         <p id="pop-note" class="muted"></p>
       </details>
+      <input id="search" class="search" type="search" placeholder="Search trips" aria-label="Search trips by name, vehicle or date" autocomplete="off" spellcheck="false" hidden>
+      <label id="starred-row" class="starred-row" hidden><input id="starred-only" type="checkbox"> Starred only</label>
       <ul id="list" class="list"></ul>
       <p id="empty" class="empty" hidden></p>
     </aside>
@@ -83,6 +87,7 @@
             <a id="export-share" class="btn" download title="One web page with this trip's route, figures and replay that anyone can open, with nothing to install. It contains the trip's positions." hidden>Share</a>
           </div>
           <div id="actions" class="actions" hidden>
+            <button id="star" class="btn" type="button" aria-pressed="false" title="Mark this trip as a favourite, so it is easy to find">&#x2606; Star</button>
             <button id="rename" class="btn" type="button">Rename</button>
             <button id="delete" class="btn danger" type="button">Delete</button>
           </div>
@@ -99,6 +104,8 @@
             <button id="base-sat" data-base="sat" type="button" aria-pressed="false">Satellite</button>
           </div>
           <div id="legend" class="legend" aria-hidden="true"></div>
+          <button id="recentre" class="recentre" type="button" title="Centre the map on the car and follow it" hidden>Re-centre on the car</button>
+          <div id="limit-sign" class="limit-sign" role="img" hidden><span></span></div>
           <div class="sizer" role="group" aria-label="Map size">
             <button id="map-smaller" type="button" aria-label="Smaller map" title="Smaller map">&minus;</button>
             <button id="map-bigger" type="button" aria-label="Bigger map" title="Bigger map">+</button>

@@ -55,6 +55,7 @@ export const api = {
   liveTrip: (id, after) => call("GET", `/api/triplog/${encodeURIComponent(id)}/live?after=${encodeURIComponent(after)}`),
   getTrip: (id) => call("GET", `/api/triplog/${encodeURIComponent(id)}`),
   renameTrip: (id, name) => call("PATCH", `/api/triplog/${encodeURIComponent(id)}`, { name }),
+  starTrip: (id, starred) => call("PATCH", `/api/triplog/${encodeURIComponent(id)}`, { starred }),
   deleteTrip: (id) => call("DELETE", `/api/triplog/${encodeURIComponent(id)}`),
   getClient: () => call("GET", "/api/client"),
   getSettings: () => call("GET", "/api/settings"),
