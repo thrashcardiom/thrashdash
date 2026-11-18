@@ -18,6 +18,9 @@ LAYOUT_FORMAT = 1
 MAX_WIDGETS = 200
 MAX_NAME = 60
 MAX_STR = 200
+MAX_EARTH_PATH = 500
+IMPACT_DAMAGE_RANGE = (0.1, 100.0)  # % of the body a knock must damage to count as an impact (100: damage never counts)
+IMPACT_G_RANGE = (2.0, 20.0)  # g a knock must reach to count (the trip records nothing weaker); 0 turns force off
 MAX_LIST = 20
 MAX_DICT = 10
 
@@ -198,6 +201,11 @@ def validate_settings(raw):
             if not isinstance(raw[flag], bool):
                 raise ValidationError(f"{flag}: must be true or false")
             clean[flag] = raw[flag]
+    if "earthPath" in raw:
+        path = raw["earthPath"]
+        if not isinstance(path, str) or len(path) > MAX_EARTH_PATH or any(ord(c) < 32 for c in path):
+            raise ValidationError(f"earthPath: must be text of at most {MAX_EARTH_PATH} characters, on one line")
+        clean["earthPath"] = path.strip()
     if "autoSwitch" in raw:
         if not isinstance(raw["autoSwitch"], bool):
             raise ValidationError("autoSwitch: must be true or false")
@@ -220,6 +228,18 @@ def validate_settings(raw):
                     raise ValidationError(f"alerts.off: {alert_id!r} is not a valid alert id")
             clean_alerts["off"] = sorted(set(off))
         clean["alerts"] = clean_alerts
+    rule = raw.get("impactRule")
+    if rule is not None:
+        if not isinstance(rule, dict):
+            raise ValidationError("impactRule: must be an object")
+        clean_rule = {}
+        for key, (low, high), allow_zero in (("damage", IMPACT_DAMAGE_RANGE, False), ("g", IMPACT_G_RANGE, True)):
+            if key in rule:
+                v = rule[key]
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or not ((allow_zero and v == 0) or low <= v <= high):
+                    raise ValidationError(f"impactRule.{key}: must be a number from {low:g} to {high:g}" + (" (or 0 for off)" if allow_zero else ""))
+                clean_rule[key] = float(v)
+        clean["impactRule"] = clean_rule
     idle = raw.get("tripIdleEndMin")
     if idle is not None:
         if isinstance(idle, bool) or idle not in TRIP_IDLE_CHOICES:

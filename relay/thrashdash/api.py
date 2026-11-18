@@ -1,5 +1,6 @@
 """REST endpoints for layouts and settings (everything the editor persists)."""
 import asyncio
+from datetime import datetime
 import ipaddress
 
 from aiohttp import web
@@ -11,6 +12,8 @@ from .store import LayoutStore, NotFound, ReadOnly, SettingsStore
 from . import tripexport, tripshare
 from .configs import windows_differ
 from .triplog import Busy, NotFound as TripNotFound
+from . import earthlaunch, tripedit
+from .tripedit import EditError
 from .validate import ValidationError
 
 LAYOUTS = web.AppKey("layouts", LayoutStore)
@@ -385,7 +388,8 @@ async def share_triplog_trip(request):
         return _error(404, "there is no such trip")
     if not trip.get("end"):
         return _error(409, "this trip is still being recorded: share it once it has ended")
-    page = tripshare.build_share_page(trip, request.app[SETTINGS].get()["units"], web_root())
+    settings = request.app[SETTINGS].get()
+    page = tripshare.build_share_page(trip, settings["units"], web_root(), settings["impactRule"])
     name = tripexport.file_name(trip, trip.get("stats"), "html")
     return web.Response(text=page, content_type="text/html", charset="utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
@@ -405,19 +409,23 @@ async def export_triplog_trip(request):
 
 async def rename_triplog_trip(request):
     """Change an ended trip: {"name": "..."} gives it a name (an empty name takes it away), {"starred": true|false} marks it as a
-    favourite or not. Either or both."""
+    favourite or not, {"note": {"t": seconds, "text": "..."}} writes a note against the waypoint at that time (an empty text takes it
+    away). Any of them."""
     log = request.app[TRIPLOG]
     body = await _body(request)
     if log is None or not isinstance(body, dict):
         return _error(404, "there is no such trip")
-    if "name" not in body and "starred" not in body:
-        return _error(400, 'give a "name" or "starred"')
+    if "name" not in body and "starred" not in body and "note" not in body:
+        return _error(400, 'give a "name", "starred" or "note"')
     reply = {"ok": True}
     try:
         if "name" in body:
             reply["title"] = log.rename(request.match_info["id"], body.get("name"))
         if "starred" in body:
             reply["starred"] = log.star(request.match_info["id"], body.get("starred"))
+        if "note" in body:
+            note = body["note"] if isinstance(body["note"], dict) else {}
+            reply["note"] = log.note(request.match_info["id"], note.get("t"), note.get("text"))
     except TripNotFound:
         return _error(404, "there is no such trip")
     except Busy:
@@ -441,6 +449,116 @@ async def delete_triplog_trip(request):
     return web.json_response({"ok": True})
 
 
+async def join_triplog_trips(request):
+    """Make one trip of two: {"first": id, "second": id}, the first the earlier; "force": true joins them even though they do not look like
+    one drive (a long break, far apart, different vehicles). Answers with the new trip's id."""
+    log = request.app[TRIPLOG]
+    body = await _body(request)
+    if log is None or not isinstance(body, dict):
+        return _error(404, "there is no trip log")
+    first, second = body.get("first"), body.get("second")
+    force = body.get("force", False)
+    if not (isinstance(first, str) and isinstance(second, str)):
+        return _error(400, 'give the "first" and "second" trip')
+    if not isinstance(force, bool):
+        return _error(400, '"force" must be true or false')
+    try:
+        new_id = await asyncio.to_thread(log.join, first, second, force)
+    except TripNotFound:
+        return _error(404, "there is no such trip")
+    except Busy:
+        return _error(409, "a trip is still being recorded")
+    except EditError as e:
+        return _error(400, str(e))
+    return web.json_response({"ok": True, "id": new_id})
+
+
+async def triplog_join_options(request):
+    """The trips either side of this one that it could be joined with, so the page offers only joins that will work."""
+    log = request.app[TRIPLOG]
+    if log is None:
+        return _error(404, "there is no such trip")
+    return web.json_response(await asyncio.to_thread(log.join_options, request.match_info["id"]))
+
+
+async def cut_triplog_trip(request):
+    """Cut a trip in two: {"at": seconds into the trip}. Answers with the ids of the two parts."""
+    log = request.app[TRIPLOG]
+    body = await _body(request)
+    if log is None or not isinstance(body, dict):
+        return _error(404, "there is no such trip")
+    try:
+        ids = await asyncio.to_thread(log.cut, request.match_info["id"], body.get("at"))
+    except TripNotFound:
+        return _error(404, "there is no such trip")
+    except Busy:
+        return _error(409, "this trip is still being recorded")
+    except EditError as e:
+        return _error(400, str(e))
+    return web.json_response({"ok": True, "ids": ids})
+
+
+async def backup_triplog(request):
+    """All finished trips as one zip. This computer only: it holds every position you have driven."""
+    log = request.app[TRIPLOG]
+    if log is None:
+        return _error(404, "there is no trip log")
+    if not request.app[LOCAL_CHECK](request.remote):
+        raise web.HTTPForbidden(text="a backup can only be made from the computer running ThrashDash")
+    data = await asyncio.to_thread(log.backup)
+    name = f"thrashdash-trips-{datetime.now().strftime('%Y%m%d')}.zip"
+    return web.Response(body=data, content_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+async def import_triplog(request):
+    """Bring in the tracks of an uploaded GPX file (the request body) as trips."""
+    log = request.app[TRIPLOG]
+    if log is None:
+        return _error(404, "there is no trip log")
+    from . import tripimport
+    chunks, total = [], 0
+    async for chunk in request.content.iter_chunked(1 << 20):
+        total += len(chunk)
+        if total > tripimport.MAX_BYTES:
+            return _error(413, "that file is too big to be a GPX track")
+        chunks.append(chunk)
+    try:
+        result = await asyncio.to_thread(log.import_gpx, b"".join(chunks))
+    except EditError as e:
+        return _error(400, str(e))
+    return web.json_response({"ok": True, **result})
+
+
+async def restore_triplog(request):
+    """Add the trips in an uploaded backup zip (the request body) that are not here already."""
+    log = request.app[TRIPLOG]
+    if log is None:
+        return _error(404, "there is no trip log")
+    chunks, total = [], 0
+    async for chunk in request.content.iter_chunked(1 << 20):
+        total += len(chunk)
+        if total > tripedit.RESTORE_MAX_BYTES:  # (checked as it arrives: the body is never held whole past the limit)
+            return _error(413, "that file is too big to be a trip backup")
+        chunks.append(chunk)
+    try:
+        counts = await asyncio.to_thread(log.restore, b"".join(chunks))
+    except EditError as e:
+        return _error(400, str(e))
+    return web.json_response({"ok": True, **counts})
+
+
+async def earth_info(request):
+    """What the "start BeamNG.Earth with ThrashDash" setting would start, without starting it: {configured, chosen, message, running}.
+    This computer only: it names folders on it."""
+    if not request.app[LOCAL_CHECK](request.remote):
+        raise web.HTTPForbidden(text="only the computer running ThrashDash may look at this")
+    setting = request.query.get("path")
+    if setting is None:
+        setting = request.app[SETTINGS].get().get("earthPath", "")
+    info = await asyncio.to_thread(earthlaunch.describe, setting[:500])
+    return web.json_response(info)
+
+
 def add_routes(app):
     r = app.router
     r.add_get("/api/layouts", list_layouts)
@@ -456,8 +574,15 @@ def add_routes(app):
     r.add_delete("/api/configs/{id}", delete_config)
     r.add_post("/api/quit", quit_thrashdash)
     r.add_post("/api/triplog/test-popup", test_popup)
+    r.add_get("/api/earth", earth_info)
     r.add_get("/api/triplog/routes", get_triplog_routes)  # (before {id}: first match wins)
+    r.add_get("/api/triplog/backup", backup_triplog)
+    r.add_post("/api/triplog/join", join_triplog_trips)
+    r.add_post("/api/triplog/restore", restore_triplog)
+    r.add_post("/api/triplog/import", import_triplog)
+    r.add_post("/api/triplog/{id}/cut", cut_triplog_trip)
     r.add_get("/api/triplog/{id}", get_triplog_trip)
+    r.add_get("/api/triplog/{id}/joins", triplog_join_options)  # (before {kind}: first match wins)
     r.add_get("/api/triplog/{id}/share", share_triplog_trip)
     r.add_get("/api/triplog/{id}/live", live_triplog_trip)  # (before {kind}: first match wins)
     r.add_get("/api/triplog/{id}/{kind}", export_triplog_trip)

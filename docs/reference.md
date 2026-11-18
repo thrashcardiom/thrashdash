@@ -29,10 +29,11 @@ Inside the data folder:
 | `settings.json` | Settings (below) |
 | `trips.json` | Trips A and B |
 | `configs.json` | Saved window configs: sets of windows (dashboards and the map window) with their sizes and places |
-| `triplog/<id>.jsonl` | The trip log: one file per drive (BeamNG.Earth); deleted trips are moved to `triplog/trash/` |
+| `triplog/<id>.jsonl` | The trip log: one file per drive (BeamNG.Earth) or per imported GPX track; deleted trips, and the originals of a join or cut, are moved to `triplog/trash/` |
 | `windows.json` | The remembered windows |
 | `auth.json` | The PIN for devices on the network, and the secret that signs their sign-in cookies (readable only by your user) |
 | `thrashdash.log` | The program's messages (AppImage only, when started from a desktop; the latest run) |
+| `earth.log` | BeamNG.Earth's own messages, when ThrashDash started it (the latest run) |
 | `window-profiles/main/` | The dashboard windows' browser profile (so ThrashDash never touches your everyday browser) |
 
 The built-in dashboards live in [`web/layouts/`](../web/layouts/) and are never modified.
@@ -60,6 +61,8 @@ If a data folder from an earlier name of this program exists and this one does n
 | `exactWindowPlacement` | `false` | Start dashboard windows in X11 mode so positions can be restored |
 | `closeWindowsOnExit` | `true` | Close the dashboard and map windows when ThrashDash closes |
 | `tripNotices` | `{"game": true, "gameStart": false, "window": true}` | Popups about trips: in the game when a trip ends, also when one starts, and a banner on the dashboard windows when one ends |
+| `impactRule` | `{"damage": 1, "g": 4}` | What counts as an impact on the Trips page: body damage of at least `damage` percent (0.1 to 100), or a force of at least `g` (2 to 20; 0 ignores force). Either half may be sent alone. A trip keeps every knock (`knocks` in its summary), so changing this never needs a trip to be worked out again |
+| `earthPath` | `""` | The folder (or file) BeamNG.Earth is kept in; ThrashDash starts the highest version in it when it starts. Empty: it does not start Earth |
 | `tripIdleEndMin` | `2` | Minutes a car may be parked before the trip ends: 1, 2, 5, 10 or 30 |
 
 ## Command line
@@ -83,6 +86,8 @@ The AppImage always adds `--quit-when-windows-close` for you, and prints `--vers
 | `--no-window` | Do not open the dashboard window (and do not restore windows). |
 | `--browser PATH` | Chromium-based browser to use for the window. |
 | `--lan` | Serve to other devices on your network from the start (it can also be switched on from the menu). It needs a PIN: if none has been chosen yet it stays off until you choose one in the menu. |
+| `--with-earth PATH` | Start BeamNG.Earth along with ThrashDash and quit when it closes. PATH is the folder it is kept in (the highest version in it is started) or its file; it overrides the `earthPath` setting. ThrashDash never closes Earth. |
+| `--no-earth` | Do not start BeamNG.Earth this time, whatever the setting says. |
 | `--keep-running` | Packaged programs (the AppImage and the Windows exe) quit when the last dashboard window closes; this keeps them running until they are stopped. |
 | `--quit-when-windows-close` | End ThrashDash a moment after the last dashboard window on this computer is closed (the AppImage uses this). With `--no-window` it only applies once a window has been opened. |
 | `--install-mod [PATH]` | Copy the BeamNG mod into the game's `mods/unpacked` folder and exit. `PATH` is the game's user folder if it cannot be found by itself. |
@@ -115,15 +120,22 @@ The relay serves the dashboard and a small JSON API on `http://127.0.0.1:8765`. 
 | `POST /api/lan/token` | A single-use sign-in token for the QR code (`{token, expiresIn}`). This computer only. |
 | `POST /api/pin/login` | A device on the network signs in (`{"pin": "4821"}`); the answer sets the sign-in cookie. Wrong guesses are slowed down (429 with `Retry-After`). |
 | `POST /api/trips/{A\|B}/reset` | Reset a trip. |
-| `GET /api/triplog` | The trip log: `{enabled, status: {recording, id, distance, duration}, trips: [...]}`, newest first, each with `id`, `ts`, `vehicle`, `ended`, `reason`, `distance` (m), `duration` (s), `top` (m/s), `points`, and `stats` (the summary, once it has ended). |
+| `GET /api/triplog` | The trip log: `{enabled, status: {recording, id, distance, duration}, trips: [...]}`, newest first, each with `id`, `ts`, `vehicle`, `ended`, `reason`, `distance` (m), `duration` (s), `top` (m/s), `points`, `starred`, `imported` (`"gpx"` for a trip brought in from a GPX file), `title` (the name the user gave it), and `stats` (the [summary](#the-trip-summary), once it has ended). |
 | `POST /api/triplog/test-popup` | Send a popup now to the game and the dashboard windows: `{ok, game}` (`game` says whether it could be sent to the game). This computer only. |
 | `GET /api/configs`, `POST /api/configs` `{name}`, `PUT /api/configs/{id}`, `PUT /api/configs/active` `{id}`, `DELETE /api/configs/{id}` | Saved window configs (see above): the list with which one is loaded and whether the windows changed since it was saved; Save as is POST and Save is PUT (both take the windows open now); picking is PUT active, which opens the config's windows that are not open. Writes are this computer only. |
 | `GET /api/triplog/routes` | Every trip's route thinned to its shape for the all-trips map: `{enabled, trips: [{id, ts, vehicle, title, name, countries, dist, dur, top, recording, line: [[lat, lon], ...]}]}`. |
 | `GET /api/triplog/{id}/live?after=T` | What a trip has gained since `T` seconds into it: `{points, info, events, end}`, for following a trip being driven. |
 | `GET /api/triplog/{id}/share` | A finished trip as one self-contained html page (see Share above). 409 while it is being recorded. |
 | `GET /api/triplog/{id}/gpx`, `/kml` | The trip as a download (GPX 1.1, or KML with the route as a line on the ground, a pin at each end and a hidden timed `gx:Track`). 404 for an unknown trip or kind. |
-| `GET /api/triplog/{id}` | One trip in full: `{header, points, info, events, end, title, stats}` (`title` is the name the user gave it, or null; `stats.limits` also has `spans` and `posted` here, the time ranges over the limit and where a posted limit was read). 404 for an unknown or malformed id. |
-| `PATCH /api/triplog/{id}` | Change an ended trip: `{"name": "..."}` renames it (an empty name takes it away; at most 80 characters), `{"starred": true}` marks it as a favourite (`false` takes the mark away); either or both. 409 while it is being recorded. This computer only. |
+| `GET /api/triplog/{id}` | One trip in full: `{header, points, info, events, pois, notes, end, title, starred, stats}` (`title` is the name the user gave it, or null; `pois` the places found near stops and `notes` the notes written against waypoints; `stats.limits` also has `spans` and `posted` here, the time ranges over the limit and where a posted limit was read). 404 for an unknown or malformed id. |
+| `GET /api/earth[?path=...]` | What the BeamNG.Earth setting (or the given text) would start, without starting it: `{configured, chosen, message, running}`. This computer only. |
+| `POST /api/triplog/import` | Add the tracks in a GPX file sent as the request body (at most 20 MB): `{ok, ids, skipped, duplicates}`. 400 with a reason for a file that is not usable. This computer only. |
+| `GET /api/triplog/backup` | Every finished trip as one zip (`thrashdash-trips-YYYYMMDD.zip`), one `.jsonl` file each. This computer only. |
+| `POST /api/triplog/restore` | Add the trips in a backup zip sent as the request body (`Content-Type: application/zip`, at most 512 MB): `{ok, added, skipped, rejected}`. Never overwrites a trip; only plain `<id>.jsonl` entries that are whole trips are used. This computer only. |
+| `GET /api/triplog/{id}/joins` | The finished trips either side of this one, and whether each could be joined with it: `{prev, next}`, each `{id, ts, title, ok, reason, forceable}` or `null` when there is no such trip (`reason` says why `ok` is false; `forceable` whether a join can still be forced). |
+| `POST /api/triplog/join` | Make one trip of two: `{"first": id, "second": id}` (the first the earlier), and optionally `"force": true` to join them though they do not look like one drive (a different vehicle model, more than an hour or 500 m apart); a trip with itself, in the wrong order, or overlapping in time cannot be forced: `{ok, id}`. 400 with a reason when they cannot be joined (different vehicle models, wrong order, overlapping, more than an hour or 500 m apart). The originals go to the trash. This computer only. |
+| `POST /api/triplog/{id}/cut` | Cut a trip in two: `{"at": seconds into the trip}`: `{ok, ids}`. 400 when a part would be shorter than 5 s. The original goes to the trash. This computer only. |
+| `PATCH /api/triplog/{id}` | Change an ended trip: `{"name": "..."}` renames it (an empty name takes it away; at most 80 characters), `{"starred": true}` marks it as a favourite (`false` takes the mark away); either or both; `{"note": {"t": seconds, "text": "..."}}` writes a note against the waypoint at that time (empty text clears it). 409 while it is being recorded. This computer only. |
 | `DELETE /api/triplog/{id}` | Move an ended trip to the trash folder. 409 while it is being recorded. This computer only. |
 | `GET /api/windows` | The remembered windows and which are open now. |
 | `PUT /api/windows/{id}` | A window reports itself (used by the dashboard). |
@@ -184,7 +196,8 @@ The trip log's own extension (BeamNG.Earth only; it runs in the game, not in a c
 | `geolive` | 10 per second | `lat`, `lon`, `hdg`, `spd`, `rt`: just where the car is, for the live map. Handed straight to the Trips page over `/ws?feed=geo`; never recorded (the trip is made from `geo`). |
 | `geoinfo` | every 1 s | `limit` (`ms`, `mapped`, `unit`); with every 2nd one `place` (street, place, region, country); with every 10th `wx` (weather) and `gps` (route progress). A packet that leaves a part out means "not read this time" for `place`, `wx` and `gps`, and "no limit known" for `limit`. |
 | `toast` (relay to game) | when a trip ends or starts | the reverse direction: `{type: "toast", title, msg}`, sent to wherever the last `geo` packet came from; the game shows it on screen |
-| `geoevent` | when it happens | `name`: `teleported`, `worldReady`, `routeArrived`, `reset`, `vehicleSwitched`, `levelStart`, `levelEnd`; with `lat`, `lon` |
+| `geoevent` | when it happens | `name`: `teleported`, `worldReady`, `routeArrived`, `reset`, `vehicleSwitched`, `levelStart`, `levelEnd`, `waypoint` (the driver's key); with `lat`, `lon` |
+| `geopoi` | once per stop (the car still for 20 s) | `poi`: up to 3 `{n: name, c: category}` for the places BeamNG.Earth finds within 100 m, nearest first; with `lat`, `lon`. Sent when the answer arrives; only the first answer with names. |
 
 These go to the trip log and the live map, not to the dashboard's channels. The relay learns where the game's extension is from where its packets come from (the extension binds its socket to `127.0.0.1`), and answers there. A packet that is malformed or out of range is counted and dropped.
 
@@ -207,15 +220,37 @@ A trip is one JSON Lines file in `triplog/` (one JSON object per line, so a cras
 
 | Line | Meaning |
 |:---|:---|
-| `trip` | The header: format, id, start time (`ts`, unix), the vehicle model and id, and the energy kind (`liquid`, `electric`, `mixed`). |
-| `p` | A point: `t` seconds into the trip, `la` and `lo` (real latitude and longitude: the game moves its own origin when you teleport, so its x and y are never kept), `al` altitude (m), `s` speed (m/s), `h` heading (degrees from north), `d` metres driven so far (summed from **every** sample, so thinning loses none), `f` fuel or charge (0 to 1), `fv` litres or kWh, `dm` body damage (% of beams broken). |
+| `trip` | The header: format, id, start time (`ts`, unix), the vehicle model and id, and the energy kind (`liquid`, `electric`, `mixed`). A trip brought in from a GPX file also has `"imported": "gpx"` (and `"est": true` when its times were estimated), and no vehicle. |
+| `p` | A point: `t` seconds into the trip, `la` and `lo` (real latitude and longitude: the game moves its own origin when you teleport, so its x and y are never kept), `al` altitude (m), `s` speed (m/s), `h` heading (degrees from north), `d` metres driven so far (summed from **every** sample, so thinning loses none), `f` fuel or charge (0 to 1), `fv` litres or kWh, `dm` body damage (% of beams broken), `g` the strongest force on the car since the previous point, in g (the relay watches the car's acceleration in every frame and takes the largest with each position). |
 | `i` | The world around the car: `place` (street, place, region, country), `lim` (`ms` metres per second, `m` true when the limit is a **posted** one and absent when it is a guess from the kind of road, `u` the unit the road uses), `wx` weather, `gps` route progress. Written when the street or limit changes, or every 10 seconds. Each line is a whole picture and holds until the next line. |
-| `e` | An event: `reset` (the R key), `routeArrived`, `worldReady`. Events that end a trip (`teleported`, `vehicleSwitched`, `levelEnd`) end it instead. |
-| `end` | The closing line: why it ended (`idle`, `teleport`, `jump`, `vehicle`, `level`, `lost`, `shutdown`, `interrupted`), duration, distance, top speed, number of points, and `sum`, the summary worked out once (and worked out again whenever its rules change). |
+| `poi` | The places the game found near where the car stood still: `poi` a list of `{n, c}` (name, category), with `la`, `lo`. Used to name the stop. |
+| `e` | An event: `reset` (the R key), `routeArrived`, `worldReady`, `waypoint` (a pin the driver dropped). Events that end a trip (`teleported`, `vehicleSwitched`, `levelEnd`) end it instead. |
+| `end` | The closing line: why it ended (`idle`, `teleport`, `jump`, `vehicle`, `level`, `lost`, `shutdown`, `interrupted`, `split` for the first part of a trip that was cut in two, or `imported` for a trip brought in from a GPX file), duration, distance, top speed, number of points, and `sum`, the summary worked out once (and worked out again whenever its rules change; it includes `stops`, where the car stood still for 30 s or more mid-trip, `refuels`, where fuel or charge was taken on, and `knocks`: every hard knock, `{t, la, lo, rise, g?, at}`, damage rising by 0.1 percentage points or more, or a force of 2 g or more, the two within 3 s counting as one; which of them are impacts is the `impactRule` setting). |
 | `name` | A name the user gave the trip, appended after the end line (the last one wins; an empty one clears it). Renaming never rewrites the file. |
+| `note` | `{"k":"note","t":30.0,"text":"..."}`: a note against the waypoint at `t` seconds into the trip, appended after the end line (the last one for a `t` wins; empty text clears it). |
 | `star` | `{"k":"star","v":true}` marks the trip as a favourite, `false` takes the mark away; appended after the end line like a name (the last one wins). |
 
 A trip that was open when ThrashDash stopped has no `end` line; the next start ends it as `interrupted`. A deleted trip is moved to `triplog/trash/`, not erased.
+
+### The trip summary
+
+`sum` on the closing line, and `stats` in the API, is worked out by [`tripstats.py`](../relay/thrashdash/tripstats.py) and carries `v`, the version of the rules that produced it: a stored summary from other rules is worked out again when it is read, so a rule can change without touching the files. Fields that do not apply to a trip are left out.
+
+| Field | Meaning |
+|:---|:---|
+| `name`, `from`, `to`, `countries`, `places` | The name (from the street at the start and at the end), the two street names, and the countries and towns passed through. |
+| `dist` (m), `dur`, `moving_s`, `stopped_s` (s), `avg_ms`, `avg_moving_ms`, `top_ms` (m/s), `bbox` | Distance, times, speeds and the box the route fits in. |
+| `alt` | `{min, max, gain, loss}` in metres. |
+| `fuel` | `{unit: "L" or "kWh", used, per_100km}`. |
+| `damage` | `{start, end, max}`: body damage, % of beams broken. |
+| `limits` | `{checked_s, over_s, over_m, max_over_ms}`: counted only where a limit is **posted**; `checked_s` is how much of the trip had one. |
+| `wx` | Weather: temperature, wind, gusts, visibility, seconds of rain and snow. |
+| `stops` | `[{t, dur, la, lo, at, poi?}]`: the car still for 30 s or more mid-trip, with the names of places found within 100 m. |
+| `refuels` | `[{t, la, lo, added, unit, at}]`: fuel or charge taken on while stopped (2 L or 1 kWh at least). |
+| `knocks` | `[{t, la, lo, rise, g?, at}]`: every hard knock, the candidates for an impact. A knock is body damage rising by 0.1 percentage points or more (a crash over a few samples counting once) or a force of 2 g or more, the two within 3 s being one knock; `rise` is the damage, `g` the strongest force (absent when the car sent none). Which are **impacts** is the `impactRule` setting, applied where the trips are shown, so changing it never needs a trip to be worked out again. |
+| `g` | `{max, t, la, lo, at}`: the strongest force on the car, in g, and where. |
+| `route` | When a route was set in the game: `{planned_m, eta_s, arrived_s, early_s, replans, off_max_m, left_m}`. |
+| `waypoints`, `resets`, `arrivals` | Counts of the waypoints dropped, the R key presses and the routes arrived at. |
 
 ## Development
 
@@ -225,11 +260,15 @@ A trip that was open when ThrashDash stopped has no `end` line; the next start e
 |:---|:---|
 | [`mod/lua/vehicle/extensions/auto/thrashdash_telemetry.lua`](../mod/lua/vehicle/extensions/auto/thrashdash_telemetry.lua) | The mod: collects electrics, tyres, damage, states and energy kind, and sends the packets. |
 | [`mod/lua/ge/extensions/thrashdash/trips.lua`](../mod/lua/ge/extensions/thrashdash/trips.lua), [`mod/scripts/thrashdash/modScript.lua`](../mod/scripts/thrashdash/modScript.lua) | The trip log's game side (BeamNG.Earth): positions, place names, speed limit, weather and events, sent to the relay. The game maps an extension name's `_` to a folder separator, so `thrashdash_trips` must be the file `thrashdash/trips.lua`. |
+| [`mod/lua/ge/extensions/core/input/actions/thrashdash.json`](../mod/lua/ge/extensions/core/input/actions/thrashdash.json) | The game's control for dropping a waypoint (unbound until the player binds a key; it calls `thrashdash_trips.dropWaypoint()`). |
 | [`relay/thrashdash/triplog.py`](../relay/thrashdash/triplog.py) | The trip log: turns the stream of positions into trips on disk (the rules for where one ends are at its top). |
-| [`web/trips.html`](../web/trips.html), [`web/js/trips/`](../web/js/trips/) | The Trips page: `trips.js` draws it, `model.js` holds the logic Node tests (colours, graph, figures); the map library is in `web/vendor/leaflet/`. |
+| [`web/trips.html`](../web/trips.html), [`web/js/trips/`](../web/js/trips/) | The Trips page: `trips.js` draws it, `model.js` holds the logic Node tests (colours, graph, figures), and `compare.js` the comparison of two trips (including `impactsOf`, the impact rule, in `model.js`); the map library is in `web/vendor/leaflet/`. |
 | [`relay/thrashdash/tripshare.py`](../relay/thrashdash/tripshare.py) | A trip as one html file: joins the Trips page's modules into one script and embeds the data. |
 | [`relay/thrashdash/tripexport.py`](../relay/thrashdash/tripexport.py) | A trip as a GPX or KML file. |
-| [`relay/thrashdash/tripstats.py`](../relay/thrashdash/tripstats.py) | What a recorded trip adds up to: name, distance, speeds, places, speeding, weather, fuel. |
+| [`relay/thrashdash/tripimport.py`](../relay/thrashdash/tripimport.py) | A GPX file brought in as trips (checked first; thinned like a recording; marked `"imported": "gpx"`). |
+| [`relay/thrashdash/earthlaunch.py`](../relay/thrashdash/earthlaunch.py) | Starting BeamNG.Earth along with ThrashDash (the highest version in a folder), following it, and quitting when it closes. |
+| [`relay/thrashdash/tripedit.py`](../relay/thrashdash/tripedit.py) | Changing finished trips: joining two, cutting one, backing up and restoring (never in place: new files, originals to the trash). |
+| [`relay/thrashdash/tripstats.py`](../relay/thrashdash/tripstats.py) | What a recorded trip adds up to: name, distance, speeds, places, speeding, weather, fuel, stops, refuels, knocks, peak G and the route. |
 | [`relay/thrashdash/hub.py`](../relay/thrashdash/hub.py) | Where "what the car is doing now" lives; merges electrics, slow data and trips into channels. |
 | [`relay/thrashdash/udp.py`](../relay/thrashdash/udp.py), [`simulator.py`](../relay/thrashdash/simulator.py) | Data sources: the real mod, and a simulated drive through the same code path. |
 | [`relay/thrashdash/server.py`](../relay/thrashdash/server.py), [`api.py`](../relay/thrashdash/api.py) | The web server, WebSocket and REST API, and the request guard. |
@@ -260,13 +299,13 @@ packaging/build-in-docker.sh        # recommended: builds inside an Ubuntu 22.04
 packaging/build.sh                  # or build directly on this machine
 ```
 
-Either produces `dist/ThrashDash-<version>-x86_64.AppImage` (about 14 MB). The steps are: make a Python environment under `build/`, freeze the relay, the dashboard (`web/`) and the mod (`mod/`) into one folder with [PyInstaller](https://pyinstaller.org/) (`packaging/thrashdash.spec`), put that in an `AppDir` with `packaging/AppRun`, the `.desktop` file and the icon, and pack it with [`appimagetool`](https://github.com/AppImage/appimagetool).
+Either produces `dist/ThrashDash-<version>-x86_64.AppImage` (about 12 MB). The steps are: make a Python environment under `build/`, freeze the relay, the dashboard (`web/`) and the mod (`mod/`) into one folder with [PyInstaller](https://pyinstaller.org/) (`packaging/thrashdash.spec`), put that in an `AppDir` with `packaging/AppRun`, the `.desktop` file and the icon, and pack it with [`appimagetool`](https://github.com/AppImage/appimagetool).
 
 - **Build on an old system.** An AppImage uses the C library of the machine it runs on, so it runs on anything *not older* than the machine it was built on. `build-in-docker.sh` builds on Ubuntu 22.04 (glibc 2.35), which covers most Linux systems from about 2022 on. A build made directly on a very new distribution may not run on older ones (the script warns about this).
 - **SELinux** (Fedora, openSUSE and others): the Docker script runs the container with SELinux labelling switched off for that one container, otherwise it cannot read the mounted folder ("Permission denied"). The folder is not relabelled.
 - **What it downloads**: PyInstaller from PyPI, and `appimagetool` and its runtime from the AppImage project's GitHub releases. Their checksums are printed during the build. Nothing else is fetched, and everything it makes stays in `build/` and `dist/`.
 - **`AppRun`** starts the program with `--quit-when-windows-close`, and keeps its output in `thrashdash.log` when there is no terminal. Commands that just print and exit (`--version`, `--help`, `--install-mod`) always print to where you ran them.
-- **What is not inside**: a browser, and the game. A Windows build (`.exe`) from the same PyInstaller recipe is planned but not done.
+- **What is not inside**: a browser, and the game. The Windows program is built from the same recipe (below).
 
 ### Building the Windows program
 
@@ -280,7 +319,7 @@ packaging\build-windows.bat
 
 - **Two programs share one folder:** `thrashdash.exe` has no console window (what you double-click; its messages go to `thrashdash.log`), and `thrashdash-cli.exe` is the same program with a console, for `--help`, `--version` and `--install-mod`.
 - **Licences travel with it:** the build runs [`packaging/collect_licenses.py`](../packaging/collect_licenses.py), which puts every bundled package's licence in a `licenses` folder next to the program, and **stops** if the bundle contains a DLL it does not know. If that happens, the message names the file: add it, with its licence, to `NATIVE_WINDOWS` in that script. (The Windows table was written without a Windows build to check against, so expect to add an entry or two the first time.)
-- **Not yet run on Windows.** The script was written on Linux, where it cannot be executed; the logic it relies on is tested there, but the first real build may need small fixes.
+- **Lightly used on Windows.** The script was written on Linux; it has since built a working program that ran on Windows 11, but it has had far less use than the Linux build, and the Windows table in `collect_licenses.py` may still need an entry if a new DLL is bundled.
 
 ### Running the tests
 
@@ -292,7 +331,7 @@ luajit tests/lua/test_trips.lua                              # the trip log's ga
 .venv/bin/python tools/ui_test.py [--keep-shots DIR]         # drives the real UI in a headless browser
 ```
 
-- The Python tests also run the two Lua tests when `luajit` is installed.
+- The Python tests also run the two Lua tests when `luajit` is installed. As a guide, a full run is about 660 Python tests, 200 Node tests, 80 Lua checks and 560 browser checks.
 - `ui_test.py` needs Chrome, Chromium or Edge. It starts its own relays with a throwaway data folder, so it never touches your layouts or settings, and it exercises the editor, menus, skins, alerts, trips, windows and the phone view with real mouse and keyboard input.
 - The QR code encoder is cross-checked against Python's `qrcode` package (install `requirements-dev.txt`).
 - `ui_test.py` takes several minutes and uses fixed ports (8771 and a few above, and UDP 24568): run one copy at a time, and stop any test relay left by a run that was interrupted.
@@ -335,7 +374,7 @@ ThrashDash is designed to be safe to leave running on a home computer. In short:
 - **Guessing is slowed.** Five wrong PINs in a row from one device, then a wait that doubles with each further miss (up to an hour); and across all devices together, 30 wrong guesses in ten minutes make everyone wait a minute. Comparison takes the same time whether or not the first digits are right.
 - **Sign-in is a signed cookie** (`HttpOnly`, `SameSite=Strict`) good for 30 days; changing the PIN changes the signing secret, which signs every device out at once. The QR code's token is random, works once, and expires in 5 minutes; it is removed from the address as soon as it is used. The PIN page only ever sends a device to a path on this site.
 - **`Host` checking.** The `Host` header must name the relay: loopback names, and, only while network access is on, IP addresses or plain computer names (`my-pc`, `my-pc.local`). A public domain name is always refused, which stops a malicious web page using DNS rebinding to reach the relay through your own browser.
-- **`Origin` checking and write header.** Requests with a foreign `Origin` are refused, and writes must carry `X-ThrashDash`, a header no other website can send (browsers require a preflight that the relay never answers). Bodies are capped at 256 KB.
+- **`Origin` checking and write header.** Requests with a foreign `Origin` are refused, and writes must carry `X-ThrashDash`, a header no other website can send (browsers require a preflight that the relay never answers). Bodies are capped at 256 KB, except the two uploads that are meant to be bigger (a GPX import, 20 MB; a backup restore, 512 MB), which are counted as they arrive and refused as soon as they pass the cap.
 - **Safe ids.** Dashboard, window and trip ids match strict patterns, so they can never point outside their folder.
 - **Strict page.** The page ships a strict Content-Security-Policy, loads nothing from the internet (the Trips page, and the live map widget it provides, alone may load map pictures from two named map servers) and builds its interface without `innerHTML`. Imported dashboards are checked twice (structure by the relay, meaning by the page).
 - **The mod** only reads vehicle data and sends UDP to localhost. It never writes files.

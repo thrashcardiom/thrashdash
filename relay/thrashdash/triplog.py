@@ -32,7 +32,7 @@ A name the user gives a trip is one more line appended after the end line (the l
 
     {"k":"name","name":"Sunday run to the coast"}
 
-and marking a trip as a favourite is another (the last one wins; false takes the mark away):
+a note against one of its waypoints is another ({"k":"note","t":12.3,"text":"great coffee"}, keyed by the waypoint's time), and marking a trip as a favourite is another (the last one wins; false takes the mark away):
 
     {"k":"star","v":true}
 
@@ -67,8 +67,11 @@ MAX_PLAUSIBLE_SPEED = 400.0  # m/s; anything faster is a glitch and is not used 
 MAX_EVENTS_PER_TRIP = 500
 HEARTBEAT_S = 10.0  # a place/limit/weather reading is written at least this often, changed or not (so a reading holds for at most this long)
 MAX_NAME_CHARS = 80
+MAX_POIS_PER_TRIP = 200  # place readings (of what is near where the car stood still) kept in one trip
+MAX_NOTE_CHARS = 200
+STANDARD_GRAVITY = 9.80665
 TRASH_DIR = "trash"
-EVENTS = ("teleported", "worldReady", "routeArrived", "reset", "vehicleSwitched", "levelStart", "levelEnd")
+EVENTS = ("teleported", "worldReady", "routeArrived", "reset", "vehicleSwitched", "levelStart", "levelEnd", "waypoint")
 ENDS_TRIP = {"teleported": "teleport", "vehicleSwitched": "vehicle", "levelEnd": "level"}
 
 TRIP_ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z(-[0-9]{1,3})?$")
@@ -156,6 +159,8 @@ class _Trip:
         self.top = 0.0
         self.points = 0
         self.events = 0
+        self.waypoints = 0
+        self.pois = 0
         self.written = None  # (lat, lon, rt, heading) of the last point written
         self.world = {}  # the place and speed limit last written down (the readings come often; only a change is worth a line)
         self.announced = False  # whether "a trip started" has been said (only once it has proved to be a trip, not a nudge)
@@ -193,6 +198,8 @@ class TripLog:
             self._on_info(packet)
         elif kind == "geoevent":
             self._on_event(packet)
+        elif kind == "geopoi":
+            self._on_poi(packet)
         else:
             self.stats["rejected_type"] += 1
 
@@ -322,6 +329,9 @@ class TripLog:
             v = car.get(channel)
             if _num(v):
                 p[key] = round(v, 4)
+        peak = car.get("gPeak")  # the strongest force since the last sample, in m/s^2 (hub.py), written in g
+        if _num(peak) and peak > 0:
+            p["g"] = round(peak / STANDARD_GRAVITY, 2)
         if self._write(p):
             trip.points += 1
             trip.written = (s.lat, s.lon, s.rt, s.hdg)
@@ -376,9 +386,34 @@ class TripLog:
             return
         trip = self._trip
         if trip is None or trip.events >= MAX_EVENTS_PER_TRIP or not _num(packet.get("rt")):
+            if name == "waypoint":
+                self._notify("waypoint", {"recorded": False})  # (the key was pressed with no trip going: say so rather than seem to have worked)
             return
         trip.events += 1
         line = {"k": "e", "t": round(packet["rt"] - trip.start_rt, 2), "name": name}
+        if _num(packet.get("lat")) and _num(packet.get("lon")):
+            line["la"], line["lo"] = round(packet["lat"], 7), round(packet["lon"], 7)
+        if self._write(line) and name == "waypoint":
+            trip.waypoints += 1
+            self._notify("waypoint", {"recorded": True, "n": trip.waypoints})
+
+    def _on_poi(self, packet):
+        """What the game found near where the car stood still: [{n: name, c: category}], written as one reading of the trip."""
+        trip = self._trip
+        places = packet.get("poi")
+        if trip is None or not _num(packet.get("rt")) or not isinstance(places, list) or trip.pois >= MAX_POIS_PER_TRIP:
+            return
+        kept = []
+        for place in places[:5]:
+            if isinstance(place, dict) and isinstance(place.get("n"), str) and place["n"].strip():
+                item = {"n": _short(place["n"].strip(), 80)}
+                if isinstance(place.get("c"), str):
+                    item["c"] = _short(place["c"], 40)
+                kept.append(item)
+        if not kept:
+            return
+        trip.pois += 1
+        line = {"k": "poi", "t": round(packet["rt"] - trip.start_rt, 2), "poi": kept}
         if _num(packet.get("lat")) and _num(packet.get("lon")):
             line["la"], line["lo"] = round(packet["lat"], 7), round(packet["lon"], 7)
         self._write(line)
@@ -557,7 +592,8 @@ class TripLog:
             head = json.loads(first)
             if not isinstance(head, dict) or head.get("k") != "trip":
                 return None
-            out = {"id": head["id"], "ts": head.get("ts", 0), "vehicle": head.get("vehicle"), "energy": head.get("energy"), "ended": False, "title": None, "starred": False}
+            out = {"id": head["id"], "ts": head.get("ts", 0), "vehicle": head.get("vehicle"), "energy": head.get("energy"), "ended": False, "title": None, "starred": False,
+                   "imported": head.get("imported") if isinstance(head.get("imported"), str) else None}
             titled = starred = False
             for raw in reversed(tail):
                 try:
@@ -618,6 +654,21 @@ class TripLog:
         self._append(self._path_of(trip_id), {"k": "star", "v": starred})
         return starred
 
+    def note(self, trip_id, t, text):
+        """Write a note against one of an ended trip's waypoints (the one at `t` seconds into the trip); an empty note takes it away. Like a
+        name it is a line added to the end of the file. Returns the note as stored. Raises NotFound, Busy, or ValueError."""
+        path = self._path_of(trip_id)
+        if not _num(t):
+            raise ValueError("say which waypoint, by its time in the trip")
+        if not isinstance(text, str):
+            raise ValueError("the note must be text")
+        data = self.read(trip_id)
+        if data is None or not any(e.get("name") == "waypoint" and _num(e.get("t")) and round(e["t"], 2) == round(t, 2) for e in data["events"]):
+            raise ValueError("there is no waypoint at that time")
+        clean = " ".join("".join(c if c.isprintable() else " " for c in text).split())[:MAX_NOTE_CHARS].strip()
+        self._append(path, {"k": "note", "t": round(t, 2), "text": clean})
+        return clean
+
     @staticmethod
     def _append(path, line):
         """Add one line to the end of an ended trip's file."""
@@ -629,6 +680,50 @@ class TripLog:
                 if f.read(1) != b"\n":  # (a half-written last line: start ours on a fresh one)
                     f.write(b"\n")
             f.write((json.dumps(line, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8"))
+
+    # Joining, cutting, backing up and restoring are in tripedit.py (it imports this module, so it is imported here when needed).
+
+    def join(self, first_id, second_id, force=False):
+        """Make one trip of two (the earlier first); `force` goes past the rules about whether it looks like one drive. Returns the new trip's
+        id. Raises NotFound, Busy, or tripedit.EditError."""
+        from . import tripedit
+        new_id = tripedit.join(self, first_id, second_id, force)
+        self._changed("ended", new_id)
+        return new_id
+
+    def join_options(self, trip_id):
+        """The trips either side of this one that it could be joined with: {"prev", "next"} (each {id, ts, title} or None)."""
+        from . import tripedit
+        return tripedit.join_options(self, trip_id)
+
+    def cut(self, trip_id, at_s):
+        """Cut a trip in two at `at_s` seconds into it. Returns [first id, second id]. Raises NotFound, Busy, or tripedit.EditError."""
+        from . import tripedit
+        ids = tripedit.cut(self, trip_id, at_s)
+        for new_id in ids:
+            self._changed("ended", new_id)
+        return ids
+
+    def import_gpx(self, data):
+        """Bring in the tracks of a GPX file as trips: {"ids", "skipped", "duplicates"}. Raises tripedit.EditError."""
+        from . import tripimport
+        result = tripimport.import_gpx(self, data)
+        for new_id in result["ids"]:
+            self._changed("ended", new_id)
+        return result
+
+    def backup(self):
+        """Every finished trip, as the bytes of a zip."""
+        from . import tripedit
+        return tripedit.backup(self)
+
+    def restore(self, data):
+        """Add the trips in a backup zip that are not here already. Returns {"added", "skipped", "rejected"}. Raises tripedit.EditError."""
+        from . import tripedit
+        counts = tripedit.restore(self, data)
+        if counts["added"]:
+            self._changed("ended", "restored")  # (pages watching the list look again)
+        return counts
 
     def delete(self, trip_id):
         """Move an ended trip to the trash folder. Raises NotFound or Busy."""
@@ -726,7 +821,8 @@ class TripLog:
         try:
             if path.stat().st_size > _MAX_READ_BYTES:
                 return None
-            out = {"header": None, "points": [], "info": [], "events": [], "end": None, "title": None, "starred": False}
+            out = {"header": None, "points": [], "info": [], "events": [], "pois": [], "end": None, "title": None, "starred": False}
+            notes = {}
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     try:
@@ -748,6 +844,11 @@ class TripLog:
                         out["title"] = obj.get("name") if isinstance(obj.get("name"), str) and obj.get("name") else None
                     elif kind == "star":
                         out["starred"] = obj.get("v") is True
+                    elif kind == "poi":
+                        out["pois"].append(obj)
+                    elif kind == "note" and _num(obj.get("t")):
+                        notes[round(obj["t"], 2)] = obj.get("text") if isinstance(obj.get("text"), str) else ""
+            out["notes"] = [{"t": t, "text": text} for t, text in sorted(notes.items()) if text]  # (the last note for a waypoint wins; an empty one clears it)
             return out if out["header"] is not None else None
         except OSError:
             return None

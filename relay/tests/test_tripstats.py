@@ -123,6 +123,78 @@ class MotionTests(unittest.TestCase):
         self.assertEqual(a["loss"], 18)  # 30.0 down to 12.0
 
 
+def rows_trip(rows, energy="liquid", info=()):
+    """A trip from (t, speed, fuel volume) rows (a fuel of None leaves the reading out); the car heads north at 10 m/s of trip clock."""
+    pts = []
+    for t, speed, fv in rows:
+        p = {"k": "p", "t": t, "la": -41.2 + t * 0.0001, "lo": 174.8, "s": speed, "d": round(t * 10.0, 1)}
+        if fv is not None:
+            p["fv"] = fv
+        pts.append(p)
+    return {"header": {"k": "trip", "id": "20260101T000000Z", "energy": energy}, "points": pts, "info": list(info), "events": [], "end": None}
+
+
+class StopTests(unittest.TestCase):
+    def test_standing_still_in_the_middle_of_a_trip_is_a_stop(self):
+        rows = [(0, 10, None), (10, 10, None), (20, 0, None), (30, 0, None), (40, 0, None), (50, 0, None), (60, 10, None), (70, 10, None)]
+        info = [{"k": "i", "t": 0, "place": {"street": "Cuba Street", "place": "Wellington"}}]
+        stops = summarise(rows_trip(rows, info=info))["stops"]
+        self.assertEqual(len(stops), 1)
+        stop = stops[0]
+        self.assertEqual((stop["t"], stop["dur"], stop["at"]), (20.0, 40.0, "Cuba Street"))
+        self.assertAlmostEqual(stop["la"], -41.2 + 35 * 0.0001, places=5)  # (the middle of where it stood)
+
+    def test_a_short_wait_like_a_red_light_is_not_a_stop(self):
+        rows = [(0, 10, None), (10, 0, None), (20, 0, None), (30, 10, None), (40, 10, None)]
+        self.assertNotIn("stops", summarise(rows_trip(rows)))
+
+    def test_the_parked_end_of_a_trip_is_not_a_stop(self):
+        rows = [(0, 10, None), (10, 10, None), (20, 0, None), (30, 0, None), (40, 0, None), (50, 0, None), (60, 0, None)]
+        self.assertNotIn("stops", summarise(rows_trip(rows)))
+
+    def test_each_stop_is_listed_in_order(self):
+        rows = [(0, 10, None), (10, 0, None), (20, 0, None), (30, 0, None), (40, 10, None), (50, 10, None), (60, 0, None), (70, 0, None), (80, 0, None), (90, 0, None), (100, 10, None), (110, 10, None)]
+        self.assertEqual([s["t"] for s in summarise(rows_trip(rows))["stops"]], [10.0, 60.0])
+
+    def test_a_stop_before_any_place_was_reported_has_no_name(self):
+        rows = [(0, 10, None), (10, 0, None), (20, 0, None), (30, 0, None), (40, 10, None)]
+        self.assertIsNone(summarise(rows_trip(rows))["stops"][0]["at"])
+
+
+class RefuelTests(unittest.TestCase):
+    def test_fuel_going_up_while_standing_is_a_refuel(self):
+        rows = [(0, 10, 40.0), (10, 10, 39.0), (20, 0, 38.5), (30, 0, 44.0), (40, 0, 52.0), (50, 10, 52.0), (60, 10, 51.0)]
+        info = [{"k": "i", "t": 0, "place": {"street": "Z Petone"}}]
+        refuels = summarise(rows_trip(rows, info=info))["refuels"]
+        self.assertEqual(len(refuels), 1)
+        self.assertEqual((refuels[0]["added"], refuels[0]["unit"], refuels[0]["at"]), (13.5, "L", "Z Petone"))
+
+    def test_the_fuel_used_is_not_thrown_off_by_a_refuel(self):
+        rows = [(0, 10, 40.0), (10, 10, 39.0), (20, 0, 38.5), (30, 0, 44.0), (40, 0, 52.0), (50, 10, 52.0), (60, 10, 51.0)]
+        self.assertEqual(summarise(rows_trip(rows))["fuel"]["used"], 2.5)  # (1.0 + 0.5 + 1.0)
+
+    def test_a_small_rise_is_noise_not_a_refuel(self):
+        rows = [(0, 10, 40.0), (10, 0, 39.0), (20, 0, 39.4), (30, 0, 39.0), (40, 10, 38.8)]
+        self.assertNotIn("refuels", summarise(rows_trip(rows)))
+
+    def test_a_rise_while_driving_is_not_a_refuel(self):
+        rows = [(0, 10, 30.0), (10, 10, 35.0), (20, 10, 41.0), (30, 10, 40.0)]
+        self.assertNotIn("refuels", summarise(rows_trip(rows)))
+
+    def test_charging_is_counted_in_kwh(self):
+        rows = [(0, 10, 30.0), (10, 0, 29.0), (20, 0, 31.0), (30, 0, 33.0), (40, 10, 33.0), (50, 10, 32.0)]
+        refuel = summarise(rows_trip(rows, energy="electric"))["refuels"][0]
+        self.assertEqual((refuel["added"], refuel["unit"]), (4.0, "kWh"))
+
+    def test_two_separate_refuels_are_two(self):
+        rows = [(0, 0, 10.0), (10, 0, 20.0), (20, 10, 19.0), (30, 10, 18.0), (40, 0, 17.0), (50, 0, 30.0), (60, 10, 29.0)]
+        self.assertEqual([r["added"] for r in summarise(rows_trip(rows))["refuels"]], [10.0, 13.0])
+
+    def test_a_trip_without_fuel_readings_has_no_refuels(self):
+        rows = [(0, 10, None), (10, 0, None), (20, 0, None)]
+        self.assertNotIn("refuels", summarise(rows_trip(rows)))
+
+
 class LimitTests(unittest.TestCase):
     def test_only_posted_limits_are_checked(self):
         # 20 m/s the whole way; one posted limit of 10 (over) and one estimated limit of 10 (not counted at all)

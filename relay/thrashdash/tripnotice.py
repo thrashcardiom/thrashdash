@@ -114,6 +114,12 @@ class TripNotices:
             title, message = format_started(info)
             if notices.get("gameStart"):
                 self._to_game(title, message)
+        elif kind == "waypoint":
+            # the waypoint key was pressed: a short word back in the game, always (a key that seems to do nothing is worse than a popup)
+            if (info or {}).get("recorded"):
+                self._to_game("Waypoint saved", f"Waypoint {info.get('n', 1)} is in this trip: add a note to it on the Trips page", 4)
+            else:
+                self._to_game("No waypoint saved", "No trip is being recorded: drive first (BeamNG.Earth's level must be loaded)", 5)
 
     def _to_windows(self, kind, title, message):
         self.seq += 1

@@ -1,0 +1,10 @@
+{
+"thrashdash_waypoint": {
+"cat": "gameplay",
+"order": 95,
+"ctx": "tlua",
+"onDown": "if thrashdash_trips then thrashdash_trips.dropWaypoint() end",
+"title": "ThrashDash: drop a waypoint",
+"desc": "Marks where you are in the trip ThrashDash is recording (BeamNG.Earth). Add a note to it afterwards on the Trips page. Unbound by default: choose a key here."
+}
+}

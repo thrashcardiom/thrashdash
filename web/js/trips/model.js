@@ -162,7 +162,7 @@ const sentence = (parts) => parts.filter(Boolean).join(", ");
  * The figures shown for a trip, as tiles: [{key, label, value, sub, tone}]. A tile is left out when the trip has nothing for
  * it (no fuel readings, no posted speed limit). `tone` is "warn" for time spent over the limit.
  */
-export function statTiles(trip, prefs) {
+export function statTiles(trip, prefs, rule) {
   const s = trip.stats;
   if (!s) return [];
   const tiles = [];
@@ -193,6 +193,22 @@ export function statTiles(trip, prefs) {
 
   if (s.damage && s.damage.max > 0) add("damage", "Damage", `${s.damage.end.toFixed(1)}%`, s.damage.max > s.damage.end ? `worst ${s.damage.max.toFixed(1)}%` : "of the body broken");
 
+  if (s.g && finite(s.g.max)) add("peakg", "Peak G", `${s.g.max.toFixed(2)} g`, s.g.at ? `at ${s.g.at}` : "the strongest force on the car");
+  const hits = impactsOf(s, rule);
+  if (hits.length) add("impacts", "Impacts", String(hits.length), impactWorst(hits), "warn");
+  if (s.route) {
+    const r = s.route;
+    const left = distanceText(r.left_m ?? 0, prefs);
+    const planned = distanceText(r.planned_m, prefs);
+    const extras = sentence([`${planned.value} ${planned.label} planned`, r.replans ? `replanned ${r.replans} ${r.replans === 1 ? "time" : "times"}` : "", r.off_max_m >= 20 ? `up to ${Math.round(r.off_max_m)} m off the route` : ""]);
+    if (r.arrived_s !== null && r.arrived_s !== undefined) {
+      const diff = finite(r.early_s) && Math.abs(r.early_s) >= 5 ? `${formatDuration(Math.abs(r.early_s))} ${r.early_s > 0 ? "faster" : "slower"} than the game said` : "";
+      add("route", "Route", `Arrived in ${formatDuration(r.arrived_s)}`, sentence([diff, extras]));
+    } else {
+      add("route", "Route", "Not finished", sentence([`${left.value} ${left.label} left`, extras]));
+    }
+  }
+
   if (s.wx && finite(s.wx.temp_avg)) {
     const t = resolveUnit("temp", prefs);
     const wind = resolveUnit("speed", prefs);
@@ -207,11 +223,115 @@ export function statTiles(trip, prefs) {
     add("limits", "Over the limit", "Not checked", "no posted speed limit on this route", "muted");
   }
 
+  if (s.stops?.length) {
+    const total = s.stops.reduce((sum, x) => sum + (x.dur || 0), 0);
+    add("stops", "Stops", String(s.stops.length), `${formatDuration(total)} standing still`);
+  }
+  if (s.refuels?.length) {
+    const kind = trip.header?.energy;
+    const economy = resolveEconomy(prefs);
+    const total = s.refuels.reduce((sum, x) => sum + x.added, 0);
+    const added = formatEnergy(total, kind, economy);
+    if (added) add("refuels", kind === "electric" ? "Charged" : "Refuelled", `+${added.value.toFixed(added.value >= 10 ? 1 : 2)} ${added.unit}`, s.refuels.length === 1 ? "one stop" : `${s.refuels.length} stops`);
+  }
+
   if (s.places?.length || s.countries?.length) {
     const towns = s.places?.length > 3 ? `${s.places.slice(0, 3).join(", ")} and ${s.places.length - 3} more` : (s.places ?? []).join(", ");
     add("places", "Places", towns || (s.countries ?? []).join(", "), towns ? (s.countries ?? []).join(", ") : "");
   }
   return tiles;
+}
+
+/** The words for a stop's marker on the map: "Stopped 3 min 20 s at Cuba Street". */
+export function stopText(stop) {
+  const near = (stop.poi ?? []).map((p) => p.n).filter(Boolean);
+  return `Stopped ${formatDuration(stop.dur)}${stop.at ? ` at ${stop.at}` : ""}${near.length ? ` (${near.join(", ")})` : ""}`;
+}
+
+/** What counts as an impact until the person says otherwise: body damage of 1% or more, or a force of 4 g or more. */
+export const DEFAULT_IMPACT_RULE = { damage: 1, g: 4 };
+
+/**
+ * The impacts in a trip's figures: the knocks (every candidate the relay kept: see tripstats.py) that pass the rule, which is the
+ * person's setting, {damage: % of the body, g: force or 0 for "ignore force"}. A knock counts when it damaged the body by `damage` or
+ * more, or reached `g`. Applied here, not when the trip is recorded, so changing the rule changes every trip at once.
+ */
+export function impactsOf(stats, rule) {
+  const r = { ...DEFAULT_IMPACT_RULE, ...(rule ?? {}) };
+  return (stats?.knocks ?? []).filter((k) => (finite(k.rise) && k.rise >= r.damage) || (r.g > 0 && finite(k.g) && k.g >= r.g));
+}
+
+/** "7.5 g" and "+3.1% of the body", for whichever of the two a knock has. */
+function impactFigures(impact) {
+  return [finite(impact.g) ? `${impact.g.toFixed(1)} g` : "", impact.rise > 0 ? `+${impact.rise.toFixed(1)}% of the body` : ""].filter(Boolean).join(", ");
+}
+
+/** The tile's small print: the hardest force and the worst damage among these impacts. */
+function impactWorst(hits) {
+  const g = Math.max(0, ...hits.map((i) => (finite(i.g) ? i.g : 0)));
+  const rise = Math.max(0, ...hits.map((i) => i.rise || 0));
+  return [g > 0 ? `up to ${g.toFixed(1)} g` : "", rise > 0 ? `worst +${rise.toFixed(1)}% of the body` : ""].filter(Boolean).join(", ");
+}
+
+/** The words for an impact's marker: "Impact: 7.5 g, +3.2% of the body at Cuba Street". */
+export function impactText(impact) {
+  return `Impact: ${impactFigures(impact) || "a knock"}${impact.at ? ` at ${impact.at}` : ""}`;
+}
+
+/**
+ * What a marker's hover text and click popup say about an impact, as lines: the heading, when and how fast the car was going, how hard
+ * and how much damage, and where. `points` are the trip's route (the speed is read from it at the time of the knock).
+ */
+export function impactDetails(impact, points, prefs) {
+  const p = Array.isArray(points) && points.length && finite(impact.t) ? sampleAtTime(points, impact.t) : null;
+  const speed = p && finite(p.s) ? speedText(p.s, prefs) : null;
+  const when = finite(impact.t) ? `${formatDuration(impact.t)} into the trip` : "";
+  return [
+    "Impact",
+    [when, speed ? `${speed.value} ${speed.label}` : ""].filter(Boolean).join(" \u00B7 "),
+    impactFigures(impact) || "a knock",
+    impact.at || "",
+  ].filter(Boolean);
+}
+
+/** What an impact says about itself in the list under the map: {t, figures, at}. */
+export function impactRow(impact) {
+  return { t: impact.t, figures: impactFigures(impact) || "a knock", at: impact.at || "" };
+}
+
+const ROAD_NUMBER = /^[A-Za-z]{0,3}\s?[0-9]{1,4}[A-Za-z]?$/; // (the same pattern as tripstats.py: "2", "SH2", "A40")
+
+/** A short name for a place reading, the way the relay names one: its street, or the town when the street is only a road number. */
+export function placeLabel(place) {
+  if (!place || typeof place !== "object") return null;
+  const street = place.street;
+  const town = place.place || place.region;
+  if (street && !ROAD_NUMBER.test(street)) return street;
+  return town || street || place.country || null;
+}
+
+/**
+ * The waypoints the driver dropped in a trip, for the list under the figures: [{t, la, lo, at, text}] in order. `at` is where, by name
+ * (the place reading in force at the time); `text` is the note written against it, or "".
+ */
+export function waypointRows(trip) {
+  const notes = new Map((trip.notes ?? []).map((n) => [Math.round(n.t * 100), n.text]));
+  const readings = (trip.info ?? []).filter((i) => finite(i.t) && i.place);
+  return (trip.events ?? []).filter((e) => e.name === "waypoint" && finite(e.t)).map((e) => {
+    let here = null;
+    for (const r of readings) {
+      if (r.t <= e.t) here = r;
+      else break;
+    }
+    return { t: e.t, la: e.la, lo: e.lo, at: placeLabel((here ?? readings[0])?.place), text: notes.get(Math.round(e.t * 100)) ?? "" };
+  });
+}
+
+/** The words for a refuel's marker: "Refuelled +13.5 L at Z Petone" ("Charged" for an electric car). */
+export function refuelText(refuel, kind, prefs) {
+  const added = formatEnergy(refuel.added, kind, resolveEconomy(prefs));
+  const amount = added ? `+${added.value.toFixed(added.value >= 10 ? 1 : 2)} ${added.unit}` : "";
+  return `${kind === "electric" ? "Charged" : "Refuelled"} ${amount}${refuel.at ? ` at ${refuel.at}` : ""}`.replace(/\s+/g, " ").trim();
 }
 
 /** The name to show for a trip: the one the user gave it, else the one worked out, else a plain "Trip". */
@@ -336,6 +456,66 @@ export function routeTotals(routes) {
   return t;
 }
 
+/**
+ * What all the finished trips in the list add up to, for the Stats view. `trips` are list items ({id, ts, vehicle, title, stats});
+ * one without a summary yet (still being recorded) is left out. Returns
+ *   {trips, dist (m), dur (s), moving (s), days, countries[], towns, fuel: {L, kWh},
+ *    records: {longest, longestTime, top, highest, climb, countries}  each {value, id, trip} or null,
+ *    vehicles: [{vehicle, trips, dist, dur, used, unit, per100}], months: [{key "2026-11", dist, trips}] oldest first}.
+ */
+export function lifetimeStats(trips, rule) {
+  const done = trips.filter((t) => t.stats);
+  const out = { trips: done.length, impacts: 0, dist: 0, dur: 0, moving: 0, days: 0, countries: [], towns: 0, fuel: {}, records: {}, vehicles: [], months: [] };
+  const days = new Set(), countries = new Set(), towns = new Set(), months = new Map(), vehicles = new Map();
+  const best = (name, value, trip) => {
+    if (!(value > 0)) return;
+    if (!out.records[name] || value > out.records[name].value) out.records[name] = { value, id: trip.id, trip };
+  };
+  for (const t of done) {
+    const s = t.stats;
+    out.dist += s.dist || 0;
+    out.dur += s.dur || 0;
+    out.moving += s.moving_s || 0;
+    out.impacts += impactsOf(s, rule).length;
+    const d = new Date(t.ts * 1000);
+    days.add(`${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`);
+    for (const c of s.countries ?? []) countries.add(c);
+    for (const p of s.places ?? []) towns.add(p);
+    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const m = months.get(month) ?? { key: month, dist: 0, trips: 0 };
+    m.dist += s.dist || 0;
+    m.trips += 1;
+    months.set(month, m);
+    best("longest", s.dist, t);
+    best("longestTime", s.dur, t);
+    best("top", s.top_ms, t);
+    best("highest", s.alt?.max, t);
+    best("climb", s.alt?.gain, t);
+    best("peakG", s.g?.max, t);
+    best("countries", (s.countries ?? []).length > 1 ? s.countries.length : 0, t);
+    const key = t.vehicle || "";
+    const v = vehicles.get(key) ?? { vehicle: key, trips: 0, dist: 0, dur: 0, used: 0, usedDist: 0, unit: "" };
+    v.trips += 1;
+    v.dist += s.dist || 0;
+    v.dur += s.dur || 0;
+    if (s.fuel && s.fuel.used > 0 && (s.dist || 0) >= 500) {
+      v.used += s.fuel.used;
+      v.usedDist += s.dist;
+      v.unit = s.fuel.unit;
+      out.fuel[s.fuel.unit] = (out.fuel[s.fuel.unit] || 0) + s.fuel.used;
+    }
+    vehicles.set(key, v);
+  }
+  out.days = days.size;
+  out.countries = [...countries].sort((a, b) => a.localeCompare(b));
+  out.towns = towns.size;
+  out.months = [...months.values()].sort((a, b) => a.key.localeCompare(b.key));
+  out.vehicles = [...vehicles.values()]
+    .map(({ usedDist, ...v }) => ({ ...v, per100: usedDist > 0 && v.used > 0 ? v.used / (usedDist / 100000) : null }))
+    .sort((a, b) => b.dist - a.dist);
+  return out;
+}
+
 /** [[south, west], [north, east]] around every route, or null when there is nothing to draw. */
 export function routesBounds(routes) {
   let south = Infinity, west = Infinity, north = -Infinity, east = -Infinity;
@@ -452,6 +632,15 @@ export function liveReadout(trip, live, prefs) {
 export const MAP_MIN_PX = 200;
 export const MAP_STEP_PX = 120; // what one click of "bigger" or "smaller" changes the height by
 const MAP_ROOM_PX = 140; // room left for the rest of the page when the map is as tall as it may be
+
+/** The height to show a map at, given the height the person chose (`wanted`) and how tall the window is now: the chosen height, kept
+ * to what the window has room for. `null` while the window has no real height yet (it is still opening), or when nothing was chosen:
+ * the stylesheet's own height then stands. The chosen height is never changed by this: a window made short and tall again gives the
+ * map back the height that was chosen. */
+export function mapHeightFor(wanted, windowHeight) {
+  if (!Number.isFinite(wanted) || !(wanted > 0) || !Number.isFinite(windowHeight) || windowHeight < MAP_MIN_PX + MAP_ROOM_PX / 2) return null;
+  return clampMapHeight(wanted, windowHeight);
+}
 
 /** A map height kept sensible: no shorter than MAP_MIN_PX, no taller than the window less room for the replay bar and the title. */
 export function clampMapHeight(px, windowHeight) {

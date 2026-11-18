@@ -22,6 +22,7 @@ from .triplog import TripLog
 from .configs import ConfigStore
 from .windows import WindowRegistry, open_config_windows, open_windows
 from .tripnotice import TripNotices
+from . import earthlaunch
 from .udp import start_listener
 from .validate import VEHICLE_RE
 
@@ -46,6 +47,10 @@ def parse_args(argv=None):
     p.add_argument("--debug-pin", metavar="PIN", help=argparse.SUPPRESS)  # testing only: set the PIN for devices on the network at start
     p.add_argument("--debug-lan-address", metavar="IP", help=argparse.SUPPRESS)  # testing only: pretend this is the computer's network address
     p.add_argument("--debug-treat-clients-as-remote", action="store_true", help=argparse.SUPPRESS)  # testing only: makes even this computer look like a phone
+    p.add_argument("--with-earth", metavar="PATH", help="start BeamNG.Earth along with ThrashDash and quit when it closes; PATH is the folder Earth is kept in (the newest version in it is started) or its file. Overrides the setting on the Trips page")
+    p.add_argument("--no-earth", action="store_true", help="do not start BeamNG.Earth this time, whatever the setting says")
+    p.add_argument("--earth-port", type=int, default=earthlaunch.EARTH_PORT, help=argparse.SUPPRESS)  # testing only: where Earth's local service is
+    p.add_argument("--debug-earth-timing", metavar="POLL,GONE", help=argparse.SUPPRESS)  # testing only: seconds between looks at Earth, and silent for how long means closed
     p.add_argument("--install-mod", nargs="?", const="", metavar="PATH", help="copy the BeamNG mod into the game's mods folder and exit; PATH is the game's user folder if it cannot be found by itself")
     p.add_argument("--version", action="version", version=f"thrashdash {__version__}")
     return p.parse_args(argv)
@@ -90,7 +95,21 @@ async def amain(args):
         await runner.cleanup()
         return 2
 
+    stop = asyncio.Event()
     background = []
+    earth_setting = None if (args.no_earth or args.simulate) else (args.with_earth if args.with_earth is not None else settings.get()["earthPath"])
+    if earth_setting:
+        earth_path, earth_message = earthlaunch.pick_earth(earth_setting)
+        if earth_path is None:
+            print(f"  earth    : not started. {earth_message}", file=sys.stderr)
+        else:
+            print(f"  earth    : {earth_message}")
+            timing = {}
+            if args.debug_earth_timing:
+                poll, gone = (float(x) for x in args.debug_earth_timing.split(","))
+                timing = {"poll_s": poll, "gone_after_s": gone, "never_up_s": gone * 4}
+            background.append(asyncio.create_task(earthlaunch.keep_with_earth(
+                earth_path, stop.set, say=lambda text: print(f"  earth    : {text}"), log_path=data_dir / "earth.log", port=args.earth_port, **timing)))
     if triplog is not None:
         background.append(asyncio.create_task(tick_triplog(triplog)))
     transport = None
@@ -140,7 +159,6 @@ async def amain(args):
             app[WINDOW_OPENER]["open"] = open_for_config  # (picking a config while running opens its windows)
             # In the background: it may wait a moment for windows left open by the previous run to reconnect.
             background.append(asyncio.create_task(report_windows(windows, settings, launch, url.rstrip("/"), browser, configs)))
-    stop = asyncio.Event()
     app[QUIT]["stop"] = stop.set  # (the Quit button in the Dashboards menu)
     if args.quit_when_windows_close:
         # With --no-window the user is opening the page themselves, so there is no "the window never opened" to quit for.

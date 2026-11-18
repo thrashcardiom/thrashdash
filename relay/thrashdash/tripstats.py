@@ -1,5 +1,6 @@
 """What a recorded trip adds up to: its name, distance and speeds, the places and countries it went through, how much of it was
-over the speed limit, the weather, the fuel used.
+over the speed limit, the weather, the fuel used, where it stopped and refuelled, the hard knocks it took, its peak force and how a
+route went.
 
 A pure function of the trip file's contents (triplog.TripLog.read), so the rules here can change at any time and every trip,
 old ones included, can be worked out again. A summary is also stored on the trip's closing line (under "sum") so the trip list
@@ -21,7 +22,7 @@ import math
 import re
 from collections import Counter
 
-STATS_VERSION = 1
+STATS_VERSION = 4
 
 START_SETTLE_S = 12.0  # place names reported before this long into a trip may still describe where the car came from
 MOVE_START_MS = 1.0  # at least this fast counts as moving (m/s); the same figure the recorder uses to start a trip
@@ -31,6 +32,18 @@ INFO_INTERVAL_S = 10.0  # how long the last reading of a trip is taken to cover
 ALT_STEP_M = 3.0  # climbing or descending is counted only once the road has risen or fallen this far (the altitude is noisy)
 MIN_FUEL_DISTANCE_M = 500.0  # no consumption figure for a trip shorter than this: the tank reading is too coarse
 MAX_PLACES = 12
+STOP_MIN_S = 30.0  # standing still this long in the middle of a trip is a stop (a red light is shorter)
+MAX_STOPS = 40
+REFUEL_MIN = {"L": 2.0, "kWh": 1.0}  # the fuel (or charge) taken on must reach this to be a refuel: the tank reading is noisy, a refuel is not
+REFUEL_MAX_SPEED_MS = 2.0  # the tank is only believed to be filling while the car is all but standing
+MAX_REFUELS = 20
+KNOCK_STEP_PCT = 0.1  # body damage rising by at least this between two samples is part of a knock (smaller changes are noise)
+KNOCK_MIN_G = 2.0  # a force at least this strong (in g) is a candidate knock even when the body barely marked (the lowest the "force" setting can go)
+KNOCK_JOIN_S = 3.0  # damage and force this close in time are the same knock
+MAX_KNOCKS = 60
+POI_NEAR_S = 5.0  # a place reading counts for a stop if it was taken from this long before the stop to the end of it
+MAX_POIS_PER_STOP = 2
+STANDARD_GRAVITY = 9.80665
 MERGE_GAP_S = 1.0  # speeding stretches closer than this are drawn as one
 MAX_SPANS = 300
 _ROAD_NUMBER_RE = re.compile(r"^[A-Za-z]{0,3}\s?[0-9]{1,4}[A-Za-z]?$")
@@ -202,6 +215,182 @@ def _damage(points):
     return {"start": round(values[0], 2), "end": round(values[-1], 2), "max": round(max(values), 2)}
 
 
+def _place_at(info, t):
+    """The street or town the car was in at `t` seconds into the trip: the last place reported by then (or the first one, for a stop
+    before the game had reported any). None when no place was ever reported."""
+    named = [i for i in info if isinstance(i.get("place"), dict) and _num(i.get("t"))]
+    if not named:
+        return None
+    here = named[0]
+    for i in named:
+        if i["t"] <= t:
+            here = i
+        else:
+            break
+    return place_label(here["place"])
+
+
+def _pois_for(pois, t0, t1):
+    """The names of the places the game found near a stop (from the `poi` readings taken during it): at most MAX_POIS_PER_STOP, nearest
+    first, each once."""
+    seen, out = set(), []
+    for reading in pois:
+        if not (t0 - POI_NEAR_S <= reading.get("t", -1e9) <= t1) or not isinstance(reading.get("poi"), list):
+            continue
+        for place in reading["poi"]:
+            name = place.get("n") if isinstance(place, dict) else None
+            if isinstance(name, str) and name and name not in seen:
+                seen.add(name)
+                out.append({"n": name, **({"c": place["c"]} if isinstance(place.get("c"), str) else {})})
+    return out[:MAX_POIS_PER_STOP]
+
+
+def _knocks(points, info):
+    """Every candidate knock: where body damage rose (in steps of at least KNOCK_STEP_PCT between samples, a crash lasting a few samples
+    counting once) or the car felt a force of at least KNOCK_MIN_G, damage and a force within KNOCK_JOIN_S of each other being one knock.
+    [{t, la, lo, rise, g?, at}]: `rise` the body damage in percentage points (0 for a knock only felt as force), `g` the strongest
+    force in it (absent when the car sent none).
+
+    Which of these is an *impact* is not decided here: it is the person's setting (damage rise and/or force), applied where the trips
+    are shown. All are kept, so changing the setting never needs a trip to be worked out again. A real crash can mark the body by
+    well under 1% (one trip's 7.5 g hit moved it 0.9%), so damage alone misses crashes that force catches.
+    """
+    hurts = []  # [{t0, t1, at (the sample), rise}]: runs of body damage
+    run = []
+
+    def close():
+        if run:
+            hurts.append({"t0": run[0][0]["t"], "t1": run[-1][0]["t"], "at": run[0][0], "rise": sum(r for _, r in run), "g": None})
+
+    for a, b in zip(points, points[1:]):
+        da, db = a.get("dm"), b.get("dm")
+        rise = db - da if _num(da) and _num(db) else 0.0
+        if rise >= KNOCK_STEP_PCT:
+            run.append((b, rise))
+        else:
+            close()
+            run = []
+    close()
+    forces, cluster = [], None  # consecutive strong samples are one force event
+    for p in points:
+        g = p.get("g")
+        if _num(g) and g >= KNOCK_MIN_G:
+            if cluster and p["t"] - cluster["t1"] <= KNOCK_JOIN_S:
+                cluster["t1"] = p["t"]
+                if g > cluster["g"]:
+                    cluster.update(g=g, at=p)
+            else:
+                if cluster:
+                    forces.append(cluster)
+                cluster = {"t0": p["t"], "t1": p["t"], "g": g, "at": p}
+    if cluster:
+        forces.append(cluster)
+    knocks = list(hurts)
+    for f in forces:
+        near = next((k for k in hurts if k["t0"] - KNOCK_JOIN_S <= f["t1"] and f["t0"] <= k["t1"] + KNOCK_JOIN_S), None)
+        if near is None:
+            knocks.append({"t0": f["t0"], "t1": f["t1"], "at": f["at"], "rise": 0.0, "g": f["g"]})
+        elif near["g"] is None or f["g"] > near["g"]:
+            near.update(g=f["g"], at=f["at"], t0=min(near["t0"], f["t0"]))  # (the position is where the force was strongest)
+        else:
+            near["t0"] = min(near["t0"], f["t0"])
+    knocks.sort(key=lambda k: k["t0"])
+    out = []
+    for k in knocks[:MAX_KNOCKS]:
+        knock = {"t": round(k["t0"], 1), "la": k["at"]["la"], "lo": k["at"]["lo"], "rise": round(k["rise"], 2)}
+        if k["g"] is not None:
+            knock["g"] = round(k["g"], 2)
+        knock["at"] = _place_at(info, k["t0"])
+        out.append(knock)
+    return out
+
+
+def _peak_g(points, info):
+    """The strongest force on the car in the trip, in g (the larger of the car's sideways and lengthways acceleration together, the
+    strongest second), and where it was: {max, t, la, lo, at}. None when the car sent no acceleration."""
+    best = None
+    for p in points:
+        g = p.get("g")
+        if _num(g) and g > 0 and (best is None or g > best["g"]):
+            best = p
+    if best is None:
+        return None
+    return {"max": round(best["g"], 2), "t": round(best["t"], 1), "la": best["la"], "lo": best["lo"], "at": _place_at(info, best["t"])}
+
+
+def _route(info, events, duration):
+    """How a route the player set in the game went: what the game estimated at the start, when the car arrived, how often it was
+    replanned and how far it strayed. None when no route was ever set. {planned_m, eta_s, arrived_s|None, early_s|None, replans, off_max_m}"""
+    gps = [(i["t"], i["gps"]) for i in info if _num(i.get("t")) and isinstance(i.get("gps"), dict) and _num(i["gps"].get("remaining"))]
+    if not gps:
+        return None
+    first_t, first = gps[0]
+    arrivals = sorted(e["t"] for e in events if isinstance(e, dict) and e.get("name") == "routeArrived" and _num(e.get("t")))
+    out = {"planned_m": round(first["remaining"]), "replans": len({g.get("routeVersion") for _, g in gps if g.get("routeVersion") is not None}) - 1,
+           "off_max_m": round(max((g.get("off") or 0.0) for _, g in gps)), "arrived_s": None}
+    if _num(first.get("eta")):
+        out["eta_s"] = round(first["eta"], 1)
+        if arrivals:
+            out["early_s"] = round(first_t + first["eta"] - arrivals[0], 1)  # positive: it took less time than the game said it would
+    if arrivals:
+        out["arrived_s"] = round(arrivals[0] - first_t, 1)
+    out["left_m"] = None if arrivals else round(gps[-1][1]["remaining"])
+    out["replans"] = max(0, out["replans"])
+    return out
+
+
+def _stops(points, info, pois=()):
+    """Where the car stood still in the middle of the trip, for at least STOP_MIN_S: [{t, dur, la, lo, at}] (`at` is where, by name).
+    A stop that runs to the end of the trip is only the car being parked, and the trip ends there, so it is not listed."""
+    out, run = [], []
+
+    def close(next_point):
+        if run and next_point is not None and next_point["t"] - run[0]["t"] >= STOP_MIN_S:  # (from the first still sample until it moved again)
+            lats, lons = [p["la"] for p in run], [p["lo"] for p in run]
+            stop = {"t": round(run[0]["t"], 1), "dur": round(next_point["t"] - run[0]["t"], 1),
+                    "la": round(sum(lats) / len(lats), 6), "lo": round(sum(lons) / len(lons), 6), "at": _place_at(info, run[0]["t"])}
+            near = _pois_for(pois, run[0]["t"], next_point["t"])
+            if near:
+                stop["poi"] = near
+            out.append(stop)
+
+    for p in points:
+        if (p.get("s") or 0.0) < MOVE_START_MS:
+            run.append(p)
+        else:
+            close(p)
+            run = []
+    # (whatever is still standing when the points run out is the parked end of the trip)
+    return out[:MAX_STOPS]
+
+
+def _refuels(points, kind, info):
+    """Where fuel (or charge) was taken on: [{t, la, lo, added, unit, at}]. The tank only counts as filling while the car is all but
+    standing; consecutive rises are one refuel, and it must reach REFUEL_MIN to count."""
+    unit = _FUEL_UNIT.get(kind)
+    if unit is None:
+        return []
+    out, start, added, last = [], None, 0.0, None
+
+    def close():
+        if start is not None and added >= REFUEL_MIN[unit]:
+            out.append({"t": round(start["t"], 1), "la": start["la"], "lo": start["lo"], "added": round(added, 2), "unit": unit, "at": _place_at(info, start["t"])})
+
+    for a, b in zip(points, points[1:]):
+        fa, fb = a.get("fv"), b.get("fv")
+        rising = _num(fa) and _num(fb) and fb > fa and (a.get("s") or 0.0) < REFUEL_MAX_SPEED_MS and (b.get("s") or 0.0) < REFUEL_MAX_SPEED_MS
+        if rising:
+            if start is None:
+                start, added = b, 0.0
+            added += fb - fa
+            last = b
+        elif start is not None:
+            close()
+            start, added, last = None, 0.0, None
+    close()
+    return out[:MAX_REFUELS]
+
+
 def summarise(data, end=None, spans=False):
     """The summary of a trip. `data` is what TripLog.read returns ({"header","points","info","events","end"}); `end` is the
     closing line when it is not in `data` yet (a trip being closed). Returns a dict that is safe to put in JSON, or None when
@@ -251,6 +440,25 @@ def summarise(data, end=None, spans=False):
                        ("damage", _damage(points)), ("limits", _speeding(points, info_spans, spans)), ("wx", _weather(_info_spans(info, duration, "wx")))):
         if value is not None:
             out[key] = value
+    pois = [i for i in data.get("pois", []) if isinstance(i, dict)]
+    stops = _stops(points, info, pois)
+    if stops:
+        out["stops"] = stops
+    knocks = _knocks(points, info)
+    if knocks:
+        out["knocks"] = knocks
+    peak = _peak_g(points, info)
+    if peak:
+        out["g"] = peak
+    route = _route(info, [e for e in data.get("events", []) if isinstance(e, dict)], duration)
+    if route:
+        out["route"] = route
+    waypoints = sum(1 for e in data.get("events", []) if isinstance(e, dict) and e.get("name") == "waypoint")
+    if waypoints:
+        out["waypoints"] = waypoints
+    refuels = _refuels(points, header.get("energy"), info)
+    if refuels:
+        out["refuels"] = refuels
     if events.get("reset"):
         out["resets"] = events["reset"]
     if events.get("routeArrived"):

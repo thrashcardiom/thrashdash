@@ -150,7 +150,11 @@ class SettingsStore:
                 # reopen the dashboard windows that were open last time; and place them exactly (X11 mode on Wayland)
                 "restoreWindows": True, "exactWindowPlacement": False,
                 # close the dashboard and map windows ThrashDash opened when it closes (they are remembered, so they come back next time)
-                "closeWindowsOnExit": True}
+                "closeWindowsOnExit": True,
+                # where BeamNG.Earth is kept (a folder: the newest version in it is started; or a file); empty: ThrashDash does not start it
+                "earthPath": "",
+                # what counts as an impact on the Trips page: body damage of at least `damage` percent, or a force of at least `g` (0: ignore force)
+                "impactRule": {"damage": 1.0, "g": 4.0}}
 
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -159,7 +163,7 @@ class SettingsStore:
     def _fresh(cls):
         d = cls.DEFAULTS
         return {"units": dict(d["units"]), "defaultLayout": d["defaultLayout"], "skins": {}, "vehicleDashboards": {}, "autoSwitch": d["autoSwitch"], "lan": d["lan"], "alerts": {"enabled": True, "off": []}, "tripNotices": dict(d["tripNotices"]), "tripIdleEndMin": d["tripIdleEndMin"],
-                "restoreWindows": d["restoreWindows"], "exactWindowPlacement": d["exactWindowPlacement"], "closeWindowsOnExit": d["closeWindowsOnExit"]}
+                "restoreWindows": d["restoreWindows"], "exactWindowPlacement": d["exactWindowPlacement"], "closeWindowsOnExit": d["closeWindowsOnExit"], "earthPath": d["earthPath"], "impactRule": dict(d["impactRule"])}
 
     def get(self):
         merged = self._fresh()
@@ -184,6 +188,9 @@ class SettingsStore:
         for flag in ("restoreWindows", "exactWindowPlacement", "closeWindowsOnExit"):
             if flag in stored:
                 merged[flag] = stored[flag]
+        if "earthPath" in stored:
+            merged["earthPath"] = stored["earthPath"]
+        merged["impactRule"].update(stored.get("impactRule", {}))
         return merged
 
     def update(self, raw):
@@ -215,6 +222,9 @@ class SettingsStore:
         for flag in ("restoreWindows", "exactWindowPlacement", "closeWindowsOnExit"):
             if flag in patch:
                 current[flag] = patch[flag]
+        if "earthPath" in patch:
+            current["earthPath"] = patch["earthPath"]
+        current["impactRule"].update(patch.get("impactRule", {}))
         if len(current["skins"]) > MAX_SKIN_ENTRIES:
             raise ValidationError(f"too many dashboards with a skin (limit {MAX_SKIN_ENTRIES})")
         if len(current["vehicleDashboards"]) > MAX_VEHICLE_RULES:

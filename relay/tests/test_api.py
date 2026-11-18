@@ -161,12 +161,24 @@ class StoreTests(unittest.TestCase):
 
 
 class SettingsStoreTests(unittest.TestCase):
+    def test_the_impact_rule_validates_merges_and_persists(self):
+        from thrashdash.validate import validate_settings, ValidationError
+        self.assertEqual(validate_settings({"impactRule": {"damage": 2, "g": 0}})["impactRule"], {"damage": 2.0, "g": 0.0})
+        for bad in ({"damage": 0}, {"damage": 101}, {"damage": "1"}, {"damage": True}, {"g": 1}, {"g": 21}, {"g": float("nan")}, {"g": None}, 5):
+            with self.assertRaises(ValidationError, msg=bad):
+                validate_settings({"impactRule": bad})
+        with tempfile.TemporaryDirectory() as d:
+            store = SettingsStore(Path(d) / "settings.json")
+            self.assertEqual(store.get()["impactRule"], {"damage": 1.0, "g": 4.0})
+            store.update({"impactRule": {"g": 6}})
+            self.assertEqual(SettingsStore(Path(d) / "settings.json").get()["impactRule"], {"damage": 1.0, "g": 6.0}, "one half changes, the other stays")
+
     def test_defaults_update_persist_and_recover_from_corruption(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "settings.json"
             store = SettingsStore(path)
             self.assertEqual(store.get(), {"units": {"speed": "kmh", "temp": "c", "distance": "km", "pressure": "psi", "economy": "auto"}, "defaultLayout": "default", "skins": {}, "vehicleDashboards": {}, "autoSwitch": True, "lan": False, "alerts": {"enabled": True, "off": []},
-                                         "tripNotices": {"game": True, "gameStart": False, "window": True}, "tripIdleEndMin": 2, "restoreWindows": True, "exactWindowPlacement": False, "closeWindowsOnExit": True})
+                                         "tripNotices": {"game": True, "gameStart": False, "window": True}, "tripIdleEndMin": 2, "restoreWindows": True, "exactWindowPlacement": False, "closeWindowsOnExit": True, "earthPath": "", "impactRule": {"damage": 1.0, "g": 4.0}})
             store.update({"units": {"speed": "mph"}})
             self.assertEqual(SettingsStore(path).get()["units"], {"speed": "mph", "temp": "c", "distance": "km", "pressure": "psi", "economy": "auto"})  # partial update keeps the rest
             path.write_text("garbage{")
@@ -405,3 +417,16 @@ class VehicleRuleTests(unittest.TestCase):
             self.assertEqual(s["vehicleDashboards"], {"midtruck": "cluster"})
             store.forget_layout("u-ffffffffffff")  # unknown id: harmless no-op
 
+
+
+class EarthSettingTests(unittest.TestCase):
+    def test_the_earth_folder_is_a_setting_that_is_kept_trimmed_and_checked(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = SettingsStore(Path(d) / "settings.json")
+            self.assertEqual(store.get()["earthPath"], "")
+            self.assertEqual(store.update({"earthPath": "  /home/me/Downloads  "})["earthPath"], "/home/me/Downloads")
+            self.assertEqual(store.get()["earthPath"], "/home/me/Downloads")
+            self.assertEqual(store.update({"earthPath": ""})["earthPath"], "", "empty means ThrashDash does not start Earth")
+            for bad in (5, None, ["x"], "a\nb", "x" * 501):
+                with self.assertRaises(ValidationError, msg=repr(bad)):
+                    store.update({"earthPath": bad})

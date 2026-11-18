@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clampMapHeight, interpolateFeed, liveReadout, advanceLive, nextAutoOpen, turnToward, WHEN_OPTIONS, filterOptions, filterRoutes, overviewTiles, routeTotals, routesBounds, REPLAY_RATES, advanceReplay, clockText, isOver, limitAt, replayReadout, RAMP, colourScaleTop, distanceAtTime, graphModel, niceTicks, routeRuns, sameTrip, sampleAtDistance, sampleAtTime, speedBucket, statTiles, tripTitle, filterTrips, tabTitle, recentTotals } from "../../web/js/trips/model.js";
+import { clampMapHeight, interpolateFeed, liveReadout, advanceLive, nextAutoOpen, turnToward, WHEN_OPTIONS, filterOptions, filterRoutes, overviewTiles, routeTotals, routesBounds, REPLAY_RATES, advanceReplay, clockText, isOver, limitAt, replayReadout, RAMP, colourScaleTop, distanceAtTime, graphModel, niceTicks, routeRuns, sameTrip, sampleAtDistance, sampleAtTime, speedBucket, statTiles, tripTitle, filterTrips, tabTitle, recentTotals, mapHeightFor, lifetimeStats, impactText, impactRow, impactDetails, impactsOf, placeLabel, waypointRows, stopText, refuelText } from "../../web/js/trips/model.js";
 import { buildPrefs } from "../../web/js/units.js";
 
 const prefs = buildPrefs({}, "");
@@ -351,4 +351,152 @@ test("recentTotals adds up the trips of the last seven days only", () => {
   assert.deepEqual(recentTotals([t(0.1, undefined, null)], now), { count: 1, distance: 0, duration: 0 }, "a trip with no figures yet still counts");
   assert.deepEqual(recentTotals([], now), { count: 0, distance: 0, duration: 0 });
   assert.equal(recentTotals([t(20, 1, 1)], now, 30).count, 1, "the number of days can be changed");
+});
+
+test("lifetimeStats adds up finished trips, finds the records, and works out each vehicle's economy", () => {
+  const T = (id, ts, vehicle, s) => ({ id, ts, vehicle, stats: s });
+  const trips = [
+    T("a", Date.UTC(2026, 10, 3, 12) / 1000, "etkc", { dist: 10000, dur: 900, moving_s: 800, top_ms: 30, countries: ["New Zealand"], places: ["Wellington"], alt: { max: 120, gain: 200 }, fuel: { unit: "L", used: 1.0 } }),
+    T("b", Date.UTC(2026, 10, 3, 14) / 1000, "etkc", { dist: 40000, dur: 2400, moving_s: 2200, top_ms: 38, countries: ["New Zealand", "Australia"], places: ["Wellington", "Sydney"], alt: { max: 300, gain: 90 }, fuel: { unit: "L", used: 3.0 } }),
+    T("c", Date.UTC(2026, 9, 20, 12) / 1000, "pickup", { dist: 20000, dur: 1500, moving_s: 1400, top_ms: 25, countries: ["Australia"], places: ["Sydney"], fuel: { unit: "L", used: 6.0 } }),
+    { id: "live", ts: Date.UTC(2026, 10, 4) / 1000, vehicle: "etkc" }, // (still being recorded: no summary)
+  ];
+  const s = lifetimeStats(trips);
+  assert.equal(s.trips, 3);
+  assert.equal(s.dist, 70000);
+  assert.equal(s.dur, 4800);
+  assert.equal(s.moving, 4400);
+  assert.equal(s.days, 2, "two different days of driving");
+  assert.deepEqual(s.countries, ["Australia", "New Zealand"]);
+  assert.equal(s.towns, 2);
+  assert.equal(s.fuel.L, 10);
+  assert.equal(s.records.longest.id, "b");
+  assert.equal(s.records.top.id, "b");
+  assert.equal(s.records.highest.id, "b");
+  assert.equal(s.records.climb.id, "a");
+  assert.equal(s.records.countries.id, "b", "most countries in one trip");
+  assert.equal(s.records.countries.value, 2);
+  assert.deepEqual(s.vehicles.map((v) => [v.vehicle, v.trips]), [["etkc", 2], ["pickup", 1]], "biggest distance first");
+  assert.ok(Math.abs(s.vehicles[0].per100 - 8) < 1e-9, "4 L over 50 km is 8 L/100 km");
+  assert.deepEqual(s.months.map((m) => [m.key, m.trips]), [["2026-10", 1], ["2026-11", 2]], "oldest first");
+  assert.equal(lifetimeStats([]).trips, 0);
+  assert.equal(lifetimeStats([]).records.longest, undefined);
+});
+
+test("a trip with only one country does not set the 'most countries' record", () => {
+  const s = lifetimeStats([{ id: "x", ts: 1.8e9, vehicle: "v", stats: { dist: 1000, dur: 60, countries: ["New Zealand"] } }]);
+  assert.equal(s.records.countries, undefined);
+});
+
+test("stop and refuel markers are worded for the map", () => {
+  assert.equal(stopText({ dur: 200, at: "Cuba Street" }), "Stopped 0:03:20 at Cuba Street");
+  assert.equal(stopText({ dur: 45, at: null }), "Stopped 0:00:45");
+  assert.match(refuelText({ added: 13.5, at: "Z Petone" }, "liquid", buildPrefs({}, "")), /^Refuelled \+13\.5 .+ at Z Petone$/);
+  assert.match(refuelText({ added: 12, at: null }, "electric", buildPrefs({}, "")), /^Charged \+/);
+});
+
+test("statTiles lists stops and refuels when the trip has them", () => {
+  const trip = { header: { energy: "liquid" }, stats: { dist: 1000, dur: 100, moving_s: 80, avg_moving_ms: 10, top_ms: 20, stops: [{ dur: 60 }, { dur: 120 }], refuels: [{ added: 10 }] } };
+  const keys = statTiles(trip, buildPrefs({}, "")).map((t) => t.key);
+  assert.ok(keys.includes("stops") && keys.includes("refuels"));
+  const none = statTiles({ header: {}, stats: { dist: 1, dur: 1, moving_s: 1, avg_moving_ms: 1, top_ms: 1 } }, buildPrefs({}, "")).map((t) => t.key);
+  assert.ok(!none.includes("stops") && !none.includes("refuels"));
+});
+
+test("mapHeightFor keeps the chosen height to the window, and gives it back when the window is tall again", () => {
+  assert.equal(mapHeightFor(520, 900), 520);
+  assert.equal(mapHeightFor(520, 420), 280, "a short window: kept to what it has room for");
+  assert.equal(mapHeightFor(520, 900), 520, "and the same choice is shown in full again in a tall one");
+  assert.equal(mapHeightFor(5000, 900), 760, "never more than the window holds");
+});
+
+test("mapHeightFor leaves the stylesheet's height alone when nothing was chosen or the window has no height yet", () => {
+  assert.equal(mapHeightFor(null, 900), null);
+  assert.equal(mapHeightFor(0, 900), null);
+  assert.equal(mapHeightFor(NaN, 900), null);
+  assert.equal(mapHeightFor(520, 0), null, "a window still opening has no height: do not shrink to the minimum");
+  assert.equal(mapHeightFor(520, 100), null);
+  assert.equal(mapHeightFor(520, undefined), null);
+});
+
+test("statTiles shows the peak force, impacts and how a route went", () => {
+  const base = { header: { energy: "liquid" }, stats: { dist: 5000, dur: 400, moving_s: 380, avg_moving_ms: 13, top_ms: 25 } };
+  const tiles = (extra) => Object.fromEntries(statTiles({ ...base, stats: { ...base.stats, ...extra } }, buildPrefs({}, "")).map((t) => [t.key, t]));
+  assert.equal(tiles({}).peakg, undefined);
+  assert.equal(tiles({}).impacts, undefined);
+  assert.equal(tiles({}).route, undefined);
+  const t = tiles({ g: { max: 1.234, at: "Cuba Street" }, knocks: [{ rise: 1.5 }, { rise: 3.25 }, { rise: 0.3 }] });
+  assert.deepEqual([t.peakg.value, t.peakg.sub], ["1.23 g", "at Cuba Street"]);
+  assert.deepEqual([t.impacts.value, t.impacts.tone], ["2", "warn"]);
+  assert.match(t.impacts.sub, /worst \+3\.3%/);
+  assert.equal(tiles({ knocks: [{ rise: 0.3 }] }).impacts, undefined, "a knock under the rule is not an impact");
+  const done = tiles({ route: { planned_m: 4147, eta_s: 192.5, arrived_s: 118.1, early_s: 74.4, replans: 1, off_max_m: 38, left_m: null } });
+  assert.equal(done.route.value, "Arrived in 0:01:58");
+  assert.match(done.route.sub, /0:01:14 faster than the game said/);
+  assert.match(done.route.sub, /replanned 1 time/);
+  assert.match(done.route.sub, /38 m off the route/);
+  const unfinished = tiles({ route: { planned_m: 5000, arrived_s: null, replans: 0, off_max_m: 3, left_m: 4000 } });
+  assert.equal(unfinished.route.value, "Not finished");
+  assert.match(unfinished.route.sub, /left/);
+  assert.ok(!/off the route/.test(unfinished.route.sub), "a few metres off is not worth saying");
+});
+
+test("stop and impact markers are worded for the map, with the places near a stop", () => {
+  assert.equal(stopText({ dur: 200, at: "Cuba Street", poi: [{ n: "Z Petone" }, { n: "Cafe Roma" }] }), "Stopped 0:03:20 at Cuba Street (Z Petone, Cafe Roma)");
+  assert.equal(stopText({ dur: 45, at: null, poi: [] }), "Stopped 0:00:45");
+  assert.equal(impactText({ rise: 3.24, at: "Cuba Street" }), "Impact: +3.2% of the body at Cuba Street");
+  assert.equal(impactText({ rise: 1, at: null }), "Impact: +1.0% of the body");
+  assert.equal(impactText({ rise: 0.9, g: 7.45, at: "Remutaka Hill" }), "Impact: 7.5 g, +0.9% of the body at Remutaka Hill");
+  assert.equal(impactText({ rise: 0, g: 5, at: null }), "Impact: 5.0 g");
+  assert.deepEqual(impactRow({ t: 126, rise: 0.9, g: 7.45, at: "Remutaka Hill" }), { t: 126, figures: "7.5 g, +0.9% of the body", at: "Remutaka Hill" });
+});
+
+test("placeLabel names a place the way the relay does", () => {
+  assert.equal(placeLabel({ street: "Oriental Parade", place: "Wellington" }), "Oriental Parade");
+  assert.equal(placeLabel({ street: "SH2", place: "Wellington" }), "Wellington");
+  assert.equal(placeLabel({ region: "Canterbury", country: "New Zealand" }), "Canterbury");
+  assert.equal(placeLabel(null), null);
+  assert.equal(placeLabel("x"), null);
+});
+
+test("waypointRows lists the waypoints with where they were and any note", () => {
+  const trip = {
+    info: [{ t: 0, place: { street: "Cuba Street" } }, { t: 50, place: { street: "Taranaki Street" } }],
+    events: [{ name: "reset", t: 5 }, { name: "waypoint", t: 20.5, la: -41.2, lo: 174.8 }, { name: "waypoint", t: 80, la: -41.3, lo: 174.8 }],
+    notes: [{ t: 80, text: "great coffee" }],
+  };
+  const rows = waypointRows(trip);
+  assert.deepEqual(rows.map((r) => [r.t, r.at, r.text]), [[20.5, "Cuba Street", ""], [80, "Taranaki Street", "great coffee"]]);
+  assert.deepEqual(waypointRows({}), []);
+  assert.deepEqual(waypointRows({ events: [{ name: "waypoint", t: 1 }], info: [] }).map((r) => r.at), [null]);
+});
+
+test("lifetimeStats counts impacts and finds the strongest force", () => {
+  const s = lifetimeStats([
+    { id: "a", ts: 1.8e9, vehicle: "v", stats: { dist: 1000, dur: 60, g: { max: 1.2 }, knocks: [{ rise: 2 }, { rise: 3 }, { rise: 0.2 }] } },
+    { id: "b", ts: 1.8e9 + 100, vehicle: "v", stats: { dist: 1000, dur: 60, g: { max: 2.4 }, knocks: [{ rise: 1 }] } },
+  ]);
+  assert.equal(s.impacts, 3);
+  assert.equal(s.records.peakG.id, "b");
+});
+
+test("impactsOf applies the person's rule: damage, or force, to the knocks a trip kept", () => {
+  const stats = { knocks: [{ t: 25, rise: 3.1, g: 8.2 }, { t: 98, rise: 0.18 }, { t: 126, rise: 0.9, g: 7.45 }, { t: 31, rise: 0, g: 2.2 }] };
+  assert.deepEqual(impactsOf(stats).map((i) => i.t), [25, 126], "the default: 1% of the body or 4 g");
+  assert.deepEqual(impactsOf(stats, { damage: 0.1, g: 0 }).map((i) => i.t), [25, 98, 126], "force off: damage alone");
+  assert.deepEqual(impactsOf(stats, { damage: 100, g: 2 }).map((i) => i.t), [25, 126, 31], "damage out of the way: force alone");
+  assert.deepEqual(impactsOf(stats, { g: 8 }).map((i) => i.t), [25], "a missing half of the rule takes the default");
+  assert.deepEqual(impactsOf({}, null), []);
+  assert.deepEqual(impactsOf(undefined), []);
+});
+
+test("impactDetails says when, how fast, how hard and where, for the marker's hover text", () => {
+  const points = [{ t: 0, s: 0 }, { t: 20, s: 10 }, { t: 30, s: 20 }];
+  const prefs = buildPrefs({}, "");
+  const lines = impactDetails({ t: 25, rise: 3.1, g: 8.25, at: "Remutaka Hill" }, points, prefs);
+  assert.equal(lines[0], "Impact");
+  assert.match(lines[1], /^0:00:25 into the trip \u00B7 5\d km\/h$/);
+  assert.equal(lines[2], "8.3 g, +3.1% of the body");
+  assert.equal(lines[3], "Remutaka Hill");
+  assert.deepEqual(impactDetails({ t: 5, rise: 0, g: 5 }, [], prefs), ["Impact", "0:00:05 into the trip", "5.0 g"], "no route, no place: only what is known");
 });

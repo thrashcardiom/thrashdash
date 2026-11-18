@@ -25,7 +25,7 @@ SLOW_SECTIONS = ("tire", "damage", "state", "energy")
 
 # Packets from the game-side trip-log extension rather than from a car: where the player is, the place name / speed limit /
 # weather there, and events such as a teleport. They go to the trip log, not to the dashboard's channels.
-GEO_TYPES = ("geo", "geoinfo", "geoevent")
+GEO_TYPES = ("geo", "geoinfo", "geoevent", "geopoi")
 
 # A source counts as "connected" if a frame arrived within this many seconds. The game sends 30/s,
 # so 2 s of silence reliably means paused-in-menu, car unseated, or game closed.
@@ -85,6 +85,7 @@ class Hub:
         self.stats = Counter()
         self.live = deque(maxlen=128)  # the game's live positions (geolive), newest last, for the Trips page's live map
         self.live_seq = 0
+        self._g_peak = 0.0  # the strongest force on the car (m/s^2) seen since the last position sample
         self._frame_json = (None, "")  # (seq, serialized) cache so N browsers share one json.dumps
 
     # ---- intake -----------------------------------------------------------------------------
@@ -158,7 +159,14 @@ class Hub:
         self.stats["geo"] += 1
         # The car's own numbers (fuel, damage) go into the trip with each position, but only while the car is sending: stale
         # values from a paused game would be wrong.
-        self.triplog.ingest(packet, self.values if self.connected else {})
+        car = dict(self.values) if self.connected else {}
+        if packet.get("type") == "geo":
+            # The strongest force on the car since the last position sample (they come once a second, a hit lasts a fraction of one):
+            # watched in every frame, taken with the sample, and started again.
+            if self._g_peak > 0 and self.connected:
+                car["gPeak"] = self._g_peak
+            self._g_peak = 0.0
+        self.triplog.ingest(packet, car)
 
     def _set_vehicle(self, vehicle):
         if vehicle != self.vehicle:
@@ -178,6 +186,11 @@ class Hub:
 
     def _accept_frame(self, vehicle, flat):
         self._set_vehicle(vehicle)
+        ax, ay = flat.get("accXSmooth"), flat.get("accYSmooth")
+        if isinstance(ax, (int, float)) and isinstance(ay, (int, float)) and not isinstance(ax, bool) and not isinstance(ay, bool):
+            g = math.hypot(ax, ay)
+            if math.isfinite(g) and g < 1e4:  # (a glitch of thousands of g is not a reading)
+                self._g_peak = max(self._g_peak, g)
         self._electrics = flat
         self._trip = self.trips.update(flat, vehicle, self._energy_kind())
         self._rebuild()

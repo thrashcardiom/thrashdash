@@ -22,6 +22,51 @@ export function sameSizeFeatures({ insetRight = 0 } = {}, win = window) {
   return `popup=yes,width=${width},height=${height},left=${left},top=${top}`;
 }
 
+// The Trips (map) window remembers how big it was, and where, so the next one opens like it. (Windows ThrashDash reopens by itself
+// at start-up come from the saved window config instead; this is for the one you open with the Trips button or the T key.)
+export const TRIPS_WINDOW_KEY = "thrashdash.tripswindow";
+const TRIPS_DEFAULT = { width: 1180, height: 760 };
+
+/** What to remember about a Trips window: its inner (page) size, which is what window.open's width and height mean, and its place. */
+export function tripsGeometry(win = window) {
+  const n = (v) => Math.round(Number(v) || 0);
+  return { width: n(win.innerWidth), height: n(win.innerHeight), x: n(win.screenX), y: n(win.screenY) };
+}
+
+/** The remembered Trips window geometry from `storage` (localStorage), or null when there is none or it is not sensible. */
+export function loadTripsGeometry(storage) {
+  try {
+    const g = JSON.parse(storage.getItem(TRIPS_WINDOW_KEY));
+    return g && [g.width, g.height].every((v) => Number.isFinite(v) && v >= MIN_W && v <= 20000) ? g : null;
+  } catch {
+    return null; // (no storage, or not what we wrote)
+  }
+}
+
+/** Remember a Trips window's geometry. Nothing when it has not changed (this is called every time the window is looked at). */
+export function saveTripsGeometry(storage, g) {
+  try {
+    const text = JSON.stringify({ width: g.width, height: g.height, x: g.x, y: g.y });
+    if (storage.getItem(TRIPS_WINDOW_KEY) !== text) storage.setItem(TRIPS_WINDOW_KEY, text);
+  } catch {
+    /* a browser that will not remember is fine */
+  }
+}
+
+/**
+ * window.open features for a new Trips window: the size the last one had (kept to the screen), and its place when that is known.
+ * Under Wayland a window cannot say where it is (it reads 0,0) and cannot be placed, so a place of 0,0 is left out.
+ */
+export function tripsFeatures(saved, win = window) {
+  const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Math.round(n)));
+  const maxW = win.screen?.availWidth || 10000;
+  const maxH = win.screen?.availHeight || 10000;
+  const g = saved ?? TRIPS_DEFAULT;
+  let features = `popup=yes,width=${clamp(g.width, MIN_W, maxW)},height=${clamp(g.height, MIN_H, maxH)}`;
+  if (saved && Number.isFinite(g.x) && Number.isFinite(g.y) && (g.x !== 0 || g.y !== 0)) features += `,left=${Math.round(g.x)},top=${Math.round(g.y)}`;
+  return features;
+}
+
 /**
  * The address of a window showing dashboard `id`. `windowId` names the window (so ThrashDash can reopen it next time).
  * With `menu`, the Dashboards menu opens at once so another can be picked.

@@ -55,7 +55,16 @@ export const api = {
   liveTrip: (id, after) => call("GET", `/api/triplog/${encodeURIComponent(id)}/live?after=${encodeURIComponent(after)}`),
   getTrip: (id) => call("GET", `/api/triplog/${encodeURIComponent(id)}`),
   renameTrip: (id, name) => call("PATCH", `/api/triplog/${encodeURIComponent(id)}`, { name }),
+  /** What the "start BeamNG.Earth" setting would start (the given text, or the saved setting): {configured, chosen, message, running}. */
+  earthInfo: (path) => call("GET", `/api/earth${path === undefined ? "" : `?path=${encodeURIComponent(path)}`}`),
+  noteWaypoint: (id, t, text) => call("PATCH", `/api/triplog/${encodeURIComponent(id)}`, { note: { t, text } }),
   starTrip: (id, starred) => call("PATCH", `/api/triplog/${encodeURIComponent(id)}`, { starred }),
+  /** Make one trip of two (the earlier first), cut a trip in two `at` seconds into it, and back up and restore every trip. */
+  joinOptions: (id) => call("GET", `/api/triplog/${encodeURIComponent(id)}/joins`),
+  joinTrips: (first, second, force = false) => call("POST", "/api/triplog/join", force ? { first, second, force: true } : { first, second }),
+  cutTrip: (id, at) => call("POST", `/api/triplog/${encodeURIComponent(id)}/cut`, { at }),
+  importGpx: (file) => call("POST", "/api/triplog/import", undefined, { body: file, headers: { "X-ThrashDash": "1", "Content-Type": "application/gpx+xml" } }),
+  restoreTrips: (zip) => call("POST", "/api/triplog/restore", undefined, { body: zip, headers: { "X-ThrashDash": "1", "Content-Type": "application/zip" } }),
   deleteTrip: (id) => call("DELETE", `/api/triplog/${encodeURIComponent(id)}`),
   getClient: () => call("GET", "/api/client"),
   getSettings: () => call("GET", "/api/settings"),

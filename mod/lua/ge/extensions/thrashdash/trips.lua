@@ -41,6 +41,9 @@ local LIVE_S = 0.1 -- the live map's position: ten a second, the in-game map's p
 local INFO_S = 1.0 -- the speed limit: it changes at a sign, so it is read as often as the position
 local PLACE_S = 2.0 -- the place name (BeamNG.Earth's own answer lags a jump by several seconds, so faster would not help)
 local SLOW_S = 10.0 -- the weather and the route's progress: they change slowly
+local POI_STILL_S = 20 -- standing still this long is a stop worth naming (a red light is not)
+local POI_RADIUS_M = 100 -- ...and the places looked for are those within this of the car
+local POI_MAX = 3 -- at most this many are kept
 local logTag = "thrashdash_trips"
 
 local WEATHER_KEYS = { "code", "tempC", "windMs", "gustMs", "rainMmH", "snowCmH", "visibilityM" }
@@ -112,12 +115,49 @@ local function playerVehicle()
   return call(function() return veh:getID() end), call(function() return veh:getJBeamFilename() end)
 end
 
+local stillS, poiAsked, poiGot = 0, false, false
+
+-- Once per stop (the car standing still for POI_STILL_S): ask BeamNG.Earth what is near, and tell the relay, which puts the names
+-- against the stop ("Stopped 3 min at Z Petone"). Earth answers from map data it already has, so this costs no network; the answer
+-- may come a little later, and only the first one with names in it is sent.
+local function askPlaces(a, pose)
+  if type(a.places) ~= "function" or call(a.has, "places") ~= true then return end
+  local lat, lon = pose.lat, pose.lon
+  poiGot = false
+  call(a.places, lat, lon, { radius = POI_RADIUS_M, limit = 5, minConfidence = 0.5 }, function(result)
+    if poiGot or type(result) ~= "table" or type(result.places) ~= "table" then return end
+    local list = {}
+    for _, place in ipairs(result.places) do
+      if type(place) == "table" and type(place.name) == "string" and place.name ~= "" then
+        list[#list + 1] = { n = place.name:sub(1, 80), c = type(place.category) == "string" and place.category:sub(1, 40) or nil }
+        if #list >= POI_MAX then break end
+      end
+    end
+    if #list == 0 then return end
+    poiGot = true
+    send({ type = "geopoi", rt = clock, lat = lat, lon = lon, poi = list })
+  end)
+end
+
+local function watchStop(a, pose)
+  if (tonumber(pose.speed) or 0) >= 1.0 then
+    stillS, poiAsked = 0, false
+    return
+  end
+  stillS = stillS + SAMPLE_S
+  if stillS >= POI_STILL_S and not poiAsked then
+    poiAsked = true
+    askPlaces(a, pose)
+  end
+end
+
 local function takeSample()
   local a = earth()
   if not a then return end
   local pose = call(a.pose)
   -- (no pose: the world is not there yet. camera: the free camera, which is not a drive)
   if type(pose) ~= "table" or not pose.lat or not pose.lon or pose.camera then return end
+  watchStop(a, pose)
   local id, model = playerVehicle()
   counter = counter + 1
   send({ type = "geo", n = counter, rt = clock, ts = os.time(), lat = pose.lat, lon = pose.lon, alt = pose.alt,
@@ -212,6 +252,10 @@ function M.onUpdate(dtReal)
 end
 
 -- The events: the game calls these on every loaded extension that defines them (BeamNG.Earth's through its own hook).
+-- The "drop a waypoint" key (core/input/actions/thrashdash.json): marks where the car is in the trip being recorded. The relay answers with
+-- a message on screen saying whether it went in.
+function M.dropWaypoint() sendEvent("waypoint") end
+
 function M.onBeamNGEarthTeleported() sendEvent("teleported") end
 function M.onBeamNGEarthWorldReady() sendEvent("worldReady") end
 function M.onBeamNGEarthRouteArrived() sendEvent("routeArrived") end

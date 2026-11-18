@@ -8,9 +8,11 @@
 
 - **A trip log you do not have to think about.** Trips start when the car moves and end when you park, teleport or leave. Each is saved as it is driven, so a crash loses nothing, and gets a name ("Courtenay Place to Hutt Road") and a summary.
 - **A map of every trip.** The route coloured by speed, with a red edge where you were over a *posted* limit; a speed and height graph; the figures; and a replay you can scrub, speed up, and watch with the map turning so the car always points up.
+- **What happened on the way.** Stops (and the places you stopped at), refuels, impacts (marked by how hard you hit, not only by the damage), peak G, how a route you set went, and **waypoints** you drop with a key and add notes to.
 - **A live map.** The Trips page opens each new trip by itself and follows the car; the same map can sit on any dashboard as a widget.
+- **All your driving added up.** A **Stats** view (totals, records, each vehicle's economy), search and favourites, **compare** two drives of the same route, **join** and **cut** trips, delete several at once, **back up** and **restore** the lot, and **import** a drive recorded elsewhere as a GPX file.
 - **Take trips with you.** Download a trip as **GPX** or **KML** (Google Earth), or as **one web page** that anyone can open with nothing installed.
-- **Popups in the game** when a trip ends (or starts).
+- **Popups in the game** when a trip ends (or starts), and ThrashDash can **start BeamNG.Earth for you** (the newest version in a folder) and quit when it closes.
 - **Dashboards**, the original half: a drag-and-drop editor, thirteen widget types, ten ready-made dashboards, four looks, tyres, damage, alerts, trip meters, per-vehicle dashboards, and phones and tablets over your network.
 - **Your windows come back as you left them**, the map window included, and close when ThrashDash does.
 - **No accounts and no cloud.** Everything runs on your computer. The one thing that uses the internet is the map pictures (OpenStreetMap, or EOX's satellite picture); nothing about your trips is sent anywhere.
@@ -27,6 +29,7 @@
 - [The trip log](#the-trip-log)
 - [The Trips page](#the-trips-page)
 - [Taking trips with you](#taking-trips-with-you)
+- [Starting BeamNG.Earth with ThrashDash](#starting-beamngearth-with-thrashdash)
 - [Windows: remembering, saving and closing](#windows-remembering-saving-and-closing)
 - [Dashboards](#dashboards)
 - [Phones and tablets](#phones-and-tablets)
@@ -52,7 +55,7 @@
 | Part | Where | What it does |
 |:---|:---|:---|
 | **Vehicle mod** | [`mod/lua/vehicle/`](mod/lua/vehicle/) | Loaded into every vehicle. Sends that car's data (30 times a second) for the gauges. It reads, never writes. |
-| **Game extension** | [`mod/lua/ge/`](mod/lua/ge/) | Runs in the game itself, only when BeamNG.Earth's level is loaded. Asks BeamNG.Earth where the car is (ten times a second for the live map, once a second for the log), and every second the speed limit, every two the street and place, every ten the weather. It also shows the popups the relay sends back. |
+| **Game extension** | [`mod/lua/ge/`](mod/lua/ge/) | Runs in the game itself, only when BeamNG.Earth's level is loaded. Asks BeamNG.Earth where the car is (ten times a second for the live map, once a second for the log), and every second the speed limit, every two the street and place, every ten the weather. It asks the game for the places near a stop, drops a waypoint when you press its key, and shows the popups the relay sends back. |
 | **Relay** | [`relay/`](relay/) | A small Python program. Cuts the stream of positions into trips and writes them to disk, works out each trip's summary, serves the pages and a JSON API, and remembers your windows. |
 | **Pages** | [`web/`](web/) | The Trips page and the dashboards: plain ES modules, no framework, no build step. Everything they need is served by the relay. |
 
@@ -232,6 +235,11 @@ A trip under 50 m or 20 s (a nudge of the car) is not kept. Pressing the R key d
 - the countries and towns passed through;
 - altitude gained and lost;
 - fuel or charge used, and per 100 km;
+- **stops** in the middle of the trip (standing still for half a minute or more, named by where, and by the places the game found within 100 m: "Stopped 3 min at Courtenay Place (Z, Cafe Roma)") and **refuels** (fuel or charge taken on while stopped, and how much);
+- **peak G**: the strongest force on the car, in g, and where it was (the car's acceleration is watched in every frame, not once a second, so a short hit is not missed);
+- **impacts**: hard knocks, each marked on the map with an orange "!" and listed under the figures with when, how hard and where (click a row to see it on the map). A knock is an impact when it damaged the body by at least a set percentage, **or** the car felt a force of at least a set number of g. The two numbers are under **Popups and settings**, **What counts as an impact** (they start at 1% and 4 g; 0 turns the force rule off). Both are needed because a real crash can barely mark the body (a 7.5 g hit moved it by 0.9%). A crash lasting a few seconds counts once. Changing a number re-works every trip at once: each trip keeps every knock it felt (damage of 0.1% or more, or 2 g or more) and the setting only decides which show;
+- **the route**, when you set one in the game: the length planned, what the game estimated at the start against how long it really took, how often it was replanned, and how far you strayed;
+- **waypoints** you dropped (below);
 - body damage;
 - weather: temperature, wind, time in rain, poorest visibility;
 - **time over the speed limit**, counted **only where the limit is posted**. BeamNG.Earth reports a limit for most roads, but only about one in ten is a real posted one (the rest are guessed from the kind of road), so a guess is never counted as speeding. The summary says how many seconds of the trip had a posted limit to check against, with a 3.6 km/h allowance for the game's speed reading.
@@ -244,13 +252,36 @@ The summary is worked out again whenever its rules change, so every old trip ben
 
 Open it with the **Trips** button at the top right of a dashboard window (move the mouse over the window to see it), or press **T** on a dashboard, or go to `http://127.0.0.1:8765/trips`. A phone on your network opens the same address with the PIN. The list of trips is on the left (one screen at a time on a phone); the one you pick is on the right. **Recording now** shows while a trip is being driven, and the browser tab's title says **Recording** too, so a window hidden behind the game still shows it in the taskbar.
 
+### Waypoints
+
+A **waypoint** is a pin you drop on the trip you are driving: "good coffee here", "bad road". It needs a key, which BeamNG's controls do not have until you choose one:
+
+1. In BeamNG, open **Options, Controls**, and search the list for **ThrashDash: drop a waypoint** (it is unbound by default, so it cannot clash with a key you use).
+2. Bind a key (or a button on your wheel) to it.
+3. While a trip is being recorded, press it. A message in the game says the waypoint is saved, or that no trip is being recorded.
+
+The waypoint is kept in the trip with where it was. Afterwards, on the Trips page, **Waypoints** under the figures lists them with the time and place and a box to **add a note** (press Enter or click away to save it). The notes show when you hover the purple pins on the map. A phone can see the notes but not write them. A note is a line added to the trip's file, like a name.
+
 ### Finding a trip
 
 - **Last 7 days** at the top of the list adds up the trips, distance and driving time of the past week.
+- **Stats** (the button at the top of the list) adds up all your finished trips: trips, days driven, distance, driving time, countries, places and fuel used; your **records** (longest trip, longest drive, top speed, highest point, biggest climb, most countries in one trip, each opening its trip); each **vehicle's** trips, distance and average economy; and distance by month. Filter it by when, vehicle and country, as on the all-trips map.
 - **Search** (above the list) narrows it to the trips whose name, vehicle or date contain every word you type, in any order. **Esc** clears it.
 - **Star** a trip (the button beside its name) to mark it as a favourite; it gets a star in the list, and **Starred only** appears above the list to show just those. The mark is a line added to the trip's file, like a name.
+- **Tick boxes** beside each trip (on the computer running ThrashDash) select several at once, to delete them together: see [Deleting several trips at once](#rename-join-cut-and-delete).
 - **Arrow keys:** **Down** from the search box goes to the first trip, then **Up** and **Down** step through the trips and open each one (**Home** and **End** go to the first and last).
 - **Quit** (at the top of the list, this computer only) stops ThrashDash from the Trips window, with an extra click to confirm.
+
+### Popups and settings
+
+The **Popups and settings** box (above the list) holds what you can change about the trip log, on the computer running ThrashDash (a phone sees them but cannot change them):
+
+| Setting | What it does |
+|:---|:---|
+| **End a trip after the car has been parked for** | 1, 2, 5, 10 or 30 minutes (default 2). Applies at once, even to a trip being driven. |
+| **Popup messages** | In the game when a trip ends, in the game when one starts, and a banner on the dashboard windows when one ends. **Send a test popup** tries them now. |
+| **What counts as an impact** | Body damage of at least a percentage (default 1%), **or** a force of at least some g (default 4; 0 ignores force). See [Summary](#the-trip-log). Changes every trip's impacts at once. |
+| **BeamNG.Earth** | The folder ThrashDash starts Earth from. See [Starting BeamNG.Earth](#starting-beamngearth-with-thrashdash). |
 
 ### The map
 
@@ -262,7 +293,7 @@ Open it with the **Trips** button at the top right of a dashboard window (move t
 
 ### Figures and graph
 
-Distance, time, average and top speed, fuel, climb, damage, weather, time over the limit and places, as tiles under the map. Below them a **speed and height graph** along the trip with the posted limits drawn on it. Move over it (or touch it) and it shows the speed, distance, time and height at that point and marks the place on the map.
+Distance, time, average and top speed, fuel, climb, damage, weather, time over the limit, stops, refuels and places, as tiles under the map. Stops show on the map as grey dots, refuels as amber ones, impacts as orange "!" pins and waypoints as purple dots; hover one to see where and for how long (or how much, or what you noted); an impact's text says when in the trip, how fast, how hard and where, and clicking it keeps that text open. Below them a **speed and height graph** along the trip with the posted limits drawn on it. Move over it (or touch it) and it shows the speed, distance, time and height at that point and marks the place on the map.
 
 ### Replay
 
@@ -288,9 +319,25 @@ The bar under the map drives the route again with a car marker pointing the way 
 
 The **All trips** button above the list draws every trip's route on one map (thinned to the route's shape, so hundreds of trips stay quick), so the roads you drive most are brightest. Filter by **when** (last 7 or 30 days, this year), **vehicle** and **country**; totals for what is shown (trips, distance, driving time, longest trip, top speed) are underneath. Hover a route to see which trip it is, click it to open it. A trip being driven shows in green and grows.
 
-### Rename and delete
+### Rename, join, cut and delete
 
 **Rename** keeps your name, and **Star** keeps its mark, as lines added to the trip's file (nothing is rewritten). **Delete** moves the file into a `trash` folder inside `triplog/`; nothing is erased, so a trip can be put back by moving the file out. Both work only on the computer running ThrashDash, like every change; a phone can look but not change.
+
+**Deleting several trips at once:** each trip in the list has a tick box (on the computer running ThrashDash; a trip still being recorded has none). Tick the ones you want, and a bar above the list says how many are selected, with **Select all shown** (it ticks what the search and **Starred only** leave showing), **Clear** and **Delete**. While any are ticked, the Delete button on an open trip reads **Delete 3 selected** and deletes those, not the open trip. Either Delete button asks twice ("Really delete 3?"), and the trips go to the `trash` folder as one does.
+
+**Join with previous / Join with next** makes one trip of two when something split a drive in two, such as a long stop. The buttons show for the trip before and after this one; the relay has checked each, and one that could not be one drive with this trip is greyed out, and says why when you point at it or press it (so a button never just vanishes). A join works when both trips are the same vehicle model and the second begins within an hour and within 500 m of where the first ended. How the first trip ended does not matter, only where the car was, so a position jump that landed close by can be joined and a teleport to the other side of the world cannot. The wait between them is kept, so the joined trip shows the stop and its clock is the real one. **You can override those rules.** If you know two trips belong together (a long break, or the car was moved), press the greyed-out button: it says why it does not look like one drive and the button changes to **Join anyway?**; press it again to do it. The gap between them is kept as a stop (a 10-hour break shows as a 10-hour stop, and the route is drawn straight across), and the joined trip takes the first trip's vehicle. Only things that make no sense cannot be overridden: a trip with itself, the later trip first, or two trips that overlap in time. Only the trips immediately before and after are offered; a trip with none finished before or after it has no button on that side.
+
+**Cut here** cuts the open trip in two at the replay position: press Play or move the slider to where you want the cut, then press **Cut here** (it asks again, showing the time). The first part keeps the name and star; the second becomes a trip of its own from that moment. Each part gets its own summary, and neither can be shorter than 5 seconds.
+
+What an edit did, or why it could not be done, shows in a line under the trip's title. Neither rewrites anything: the joined or cut trips are new files, and the trips they were made from go to the `trash` folder, so move them back to undo.
+
+### Comparing two trips
+
+**Compare** (beside GPX and KML) puts the open trip beside another one you choose. Trips with the same name (the same route, driven again) are listed first. You get both routes on one map, a table of the figures side by side (time, time moving, stops, speeds, fuel, time over the limit) with the better of each marked, and a graph of who was ahead along the way, measured by distance driven: above the dotted line the other trip was behind. It is exact where both drives followed the same road, and approximate after a detour.
+
+### Backup and restore
+
+**Backup, restore and import** (above the list, this computer only) downloads every finished trip as one zip, and restores from one (and imports a GPX file: see [below](#importing-a-drive-from-a-gpx-file)). A restore adds the trips that are not here already and never overwrites or changes one that is; anything in the zip that is not a plain trip file is ignored and counted. The zip is just the trip files, so you can also copy them into the `triplog` folder by hand.
 
 ### A live map on a dashboard
 
@@ -310,12 +357,31 @@ Three buttons beside a trip's title (any device that can open the page can use t
 
 Names are escaped and file names kept plain, so an odd trip name cannot make a file other programs refuse.
 
+### Importing a drive from a GPX file
+
+The **Backup, restore and import** box can **import a GPX file**: a drive recorded by a phone, a GPS or another program. Each track in the file becomes a trip you can replay, compare and join like any other. Times, speeds and heights come from the file where it has them; a file with no times gets estimated ones (50 km/h) and the trip says so. Imported trips have an **Imported** mark in the list and are left out of the Stats, which are about your game drives. A file is checked before it is read (one that declares entities, is over 20 MB or has over 300 000 points is refused), tracks under 50 m are skipped, and importing the same file twice adds nothing the second time.
+
+## Starting BeamNG.Earth with ThrashDash
+
+The trip log needs BeamNG.Earth running, which starts BeamNG.drive itself. If you always start them together, ThrashDash can start Earth for you:
+
+1. On the Trips page, open **Popups and settings**, and under **BeamNG.Earth** type the **folder** Earth is kept in (for example `/home/you/Downloads`) and press **Save**. The note shows which file would be started.
+2. From then on, starting ThrashDash starts Earth too. Earth starts the game as it always does.
+
+- **The newest version is chosen.** Earth is updated often and its file name carries the version, so the setting is a folder, and ThrashDash starts the **highest version number** in it (1.10.1 before 1.9.1), not the most recently downloaded file. It ignores the update notes, checksums and partial downloads. You can also name one file.
+- **It must already be executable.** On Linux ThrashDash only starts a file that is marked executable, and will not mark a download executable for you (`chmod +x`); the note tells you if the newest one is not.
+- **It quits when Earth does.** ThrashDash follows Earth: when Earth has closed, ThrashDash closes its windows and quits, as the Quit button does. **ThrashDash never closes Earth**; quit ThrashDash first and Earth carries on. If Earth is already running, a second copy is not started, and ThrashDash still follows the one that is.
+- **Earth's messages** go to `earth.log` in [the data folder](docs/reference.md#where-things-are-stored) (the latest run).
+- **From the command line**: `--with-earth /path/to/folder-or-file` for one run (it overrides the setting), `--no-earth` to skip it for one run. A launcher or shortcut that runs ThrashDash with `--with-earth` works without setting anything.
+- **Windows**: the same, looking for `BeamNG.Earth*.exe` files. This is untested.
+
 ## Windows: remembering, saving and closing
 
 ThrashDash can run several windows at once: a dashboard in each (on different monitors, say) and the Trips window. It remembers them.
 
 - **They reopen as you left them.** Every window tells ThrashDash which page it shows and how big it is. Next start, the windows that were open come back. Switch it off with **Reopen my windows when ThrashDash starts** in the editor, under **Windows**.
 - **Window config.** The **Window config** section of the Dashboards menu saves the windows open now, the dashboards **and the map window**, each with its size and (where the system reports one) its place, as a named set. **Save** overwrites the config that is loaded; **Save as…** asks for a name and makes a new one (the same way the dashboard editor saves); **Delete** removes the loaded one. The menu says when the windows have changed since the save, and which config Save would overwrite. The config last saved or picked is the one **opened when ThrashDash starts**; with none saved, the windows open last time reopen as before. Picking a config while ThrashDash runs makes it the one that opens and opens its windows that are not open yet (a window that is open stays: ThrashDash cannot close another program's window). What a dashboard window *shows*, its gauges and live map, is saved with the dashboard itself, in the editor.
+- **The Trips window remembers its size** (and where it was, where the system allows) for the next time you open it with the **Trips** button or **T**, and so does the map height inside it (the bar under the map). Both are kept by the browser ThrashDash runs in, per computer. Windows that ThrashDash reopens itself at start-up come from the saved window config instead.
 - **Quit.** The **Quit** button next to **Edit** (top right of a dashboard window, shown when you move the mouse) stops ThrashDash. It asks again first, because it sits beside Edit. Pressing Ctrl-C does the same.
 - **Closing ThrashDash closes its windows**, and they stay remembered so they come back next time. Switch it off with **Close my windows when ThrashDash closes** (editor, **Windows**); the windows then stay open, show that ThrashDash has gone, and reconnect when it is back. Phones are never closed. A page in an ordinary browser tab cannot be closed by a page, so it just shows that ThrashDash has stopped.
 - **Positions.** Size and page are always restored. *Where* a window goes depends on the system. On Windows, and on Linux under X11, positions are saved and restored. Under **Linux with Wayland** a program cannot place its own windows or read where they are, so the desktop decides. Tick **Place windows exactly** (editor, **Windows**) to run the windows in X11 compatibility mode (`--ozone-platform=x11`, through XWayland): positions are then saved, and each window moves and sizes itself to its own remembered place as it opens. It is off by default because XWayland can look softer on scaled displays.
@@ -391,6 +457,13 @@ Useful command-line options (the full list is in the reference): `--simulate` (f
 | The map is blank, or shows "Access blocked" | The map pictures come from the internet. Offline you still get the route and figures on a blank map. "Access blocked" means a map server refused the request: use the Trips page in ThrashDash (it sends what OpenStreetMap needs); a shared page opened from disk uses the satellite picture for the same reason. |
 | The satellite picture is blurry | It is about 10 m a pixel. Use **Street** for anything close up. |
 | No popups in the game | Press **Send a test popup** (Trips page, **Popups and settings**). It says whether the game could be reached. The game must be in the Earth level and have sent a position, and must have been restarted since the mod was installed or updated. `beamng.log` shows *message from ThrashDash shown* for each one received. |
+| I crashed and the trip has no impact marker | A knock is an impact only if it damaged the body by the set percentage (default 1%) **or** was at least the set force (default 4 g). A real crash can mark the body very little. Lower the numbers under **Popups and settings, What counts as an impact**: the trip keeps every knock it felt (down to 0.1% or 2 g), so nothing needs recording again. Force (g) is only recorded by this version of ThrashDash, so a trip driven before it has damage alone; older trips are worked out again the first time they are read, so restart ThrashDash after updating. |
+| There is no "ThrashDash: drop a waypoint" in the game's controls, or the key does nothing | It is unbound until you bind it (**Options, Controls**), and the game finds it when it **starts**: restart the game after installing or updating the mod. A waypoint is only saved while a trip is being recorded; the game says so when none is. |
+| The tick boxes beside the trips are missing | They show only on the computer running ThrashDash (a phone cannot delete), and not for a trip being recorded. |
+| A **Join** button is greyed out | It says why when you point at it: different vehicle, more than an hour or 500 m apart, and so on. Press it to override the rules that can be overridden (**Join anyway?**). |
+| ThrashDash did not start BeamNG.Earth | Look at the note under **Popups and settings, BeamNG.Earth**: the folder may not exist, hold no Earth program, or the newest file may not be marked executable (`chmod +x`). `earth.log` in the data folder has Earth's own messages. |
+| ThrashDash quit by itself soon after I closed BeamNG.Earth | That is what starting Earth through ThrashDash does: it follows Earth, and quits about 15 seconds after it closes. Clear the BeamNG.Earth folder in the settings (or start with `--no-earth`) to stop that. |
+| A GPX file will not import | The message says why: not a GPX file, over 20 MB or 300 000 points, declares entities, or no track at least 50 m long. |
 | A trip ended when I stopped for a short while | It ends after 2 minutes parked by default. Change it in **Popups and settings** (1, 2, 5, 10 or 30 minutes). |
 | Over-the-limit shows "Not checked" | The route had no *posted* speed limit in the map data (only about one road in ten does), and a guess is never counted. |
 | Windows reopen at the right size but all in one place | On Wayland programs cannot place windows. Tick **Place windows exactly** (editor, **Windows**), arrange the windows, use **Window config → Save**, and restart ThrashDash. |
@@ -413,9 +486,10 @@ Useful command-line options (the full list is in the reference): `--simulate` (f
 ## Known limitations
 
 - **Windows is lightly tested.** The Windows build recipe (`packaging/build.ps1`) has been used to build `thrashdash.exe` and it ran and worked on one Windows machine, but it has seen far less use than the Linux version. If `--install-mod` cannot find the game's user folder, name it yourself.
+- **What has been tried in the real game.** Positions, places, limits, weather, peak G and impacts have been seen in real drives. Waypoints, the places named at stops, and starting BeamNG.Earth along with ThrashDash have so far been tested against stand-ins (a fake game extension and a fake Earth), not the real thing, and the Windows launcher not at all, so report anything that differs.
 - **The trip log needs BeamNG.Earth** and was developed against its modding API, version 1.8 (the Earth app 1.9). A future change to that API could stop the log until ThrashDash is updated: the game extension does nothing, harmlessly, when the API is not there.
 - **Speeding is counted only where a limit is posted**, which is about one road in ten in BeamNG.Earth's data. The figure is honest about how much of the trip it covers, but it is not a full picture.
-- **Peak G is not recorded.** The position is sampled once a second, which is too coarse to catch a peak.
+- **Peak G includes crashes.** It is the strongest force on the car in the trip, from the car's own smoothed acceleration, so a hard impact can be the peak. It is the strongest second, not a single instant.
 - **The satellite picture is blurry up close** (about 10 m a pixel), and map pictures need the internet.
 - **Wayland** cannot place windows without the opt-in X11 mode.
 - **Electric and hybrid cars** are covered by tests but have not been tried in the real game. Hybrids show the percentage of tank or battery used, not litres or kWh.

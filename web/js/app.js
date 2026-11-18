@@ -9,7 +9,7 @@ import { createSwitcher } from "./switcher.js";
 import { buildPrefs } from "./units.js";
 import { createWindowReporter, ensureWindowId, randomWindowId } from "./windowState.js";
 import { applySavedPlacement } from "./windowPlace.js";
-import { openDashboardWindow, tripsUrl } from "./windows.js";
+import { loadTripsGeometry, openDashboardWindow, tripsFeatures, tripsUrl } from "./windows.js";
 import { specs } from "./widgets/index.js";
 import { createTripNotice } from "./tripnotice.js";
 
@@ -510,7 +510,7 @@ function applyStatus() {
 
 /** Open the Trips (map) window. It has an id like any window, so ThrashDash remembers its size and place with the saved config. */
 function openTripsWindow() {
-  window.open(tripsUrl(randomWindowId()), "_blank", "popup=yes,width=1180,height=760");
+  window.open(tripsUrl(randomWindowId()), "_blank", tripsFeatures(loadTripsGeometry(localStorage))); // (as big, and where, as the last one was)
 }
 
 /** ThrashDash is closing: close this window too. (A browser only lets a page close a window it may close, such as the borderless app

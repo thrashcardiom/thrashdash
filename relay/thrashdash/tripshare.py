@@ -34,7 +34,7 @@ const trip = data.trip;
 const refuse = async () => { throw new Error("not available in a shared page"); };
 export const api = {
   getClient: async () => ({ local: false, pinSet: false, lan: { enabled: false, urls: [] } }),
-  getSettings: async () => ({ units: data.units, tripNotices: { game: false, gameStart: false, window: false }, tripIdleEndMin: 2 }),
+  getSettings: async () => ({ units: data.units, tripNotices: { game: false, gameStart: false, window: false }, tripIdleEndMin: 2, impactRule: data.impactRule }),
   listTrips: async () => ({ enabled: true, status: { recording: false }, notices: {}, trips: [{
     id: trip.header.id, ts: trip.header.ts, vehicle: trip.header.vehicle, energy: trip.header.energy, ended: true, reason: trip.end && trip.end.reason,
     duration: trip.stats && trip.stats.dur, distance: trip.stats && trip.stats.dist, top: trip.end && trip.end.top, title: trip.title, stats: trip.stats, recording: false }] }),
@@ -132,7 +132,7 @@ def _shared_trip(trip):
             "title": trip.get("title"), "stats": trip.get("stats")}
 
 
-def build_share_page(trip, units, root):
+def build_share_page(trip, units, root, impact_rule=None):
     """The whole shared file as text. `trip` is TripLog.detail's result for a finished trip; `units` the user's unit choices;
     `root` the web folder."""
     root = Path(root)
@@ -158,7 +158,7 @@ def build_share_page(trip, units, root):
     # Leaflet's licence asks that its notice travels with every copy of the library; this file is a copy of it.
     notice = (root / "vendor/leaflet/LICENSE").read_text(encoding="utf-8").replace("--", "- -")
     page = page.replace("</head>", f"<!-- Leaflet, bundled in this page:\n{notice}\n-->\n</head>", 1)
-    payload = _script_json({"trip": _shared_trip(trip), "units": units})
+    payload = _script_json({"trip": _shared_trip(trip), "units": units, "impactRule": impact_rule})
     tail = (f'<script type="application/json" id="share-data">{payload}</script>\n'
             + "".join(f"<script>{s}</script>\n" for s in scripts))
     return page.replace("</body>", tail + "</body>", 1)

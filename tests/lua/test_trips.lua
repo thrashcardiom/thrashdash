@@ -284,6 +284,92 @@ do
   check("an event carries where it happened", e.lat == -41.2258 and e.lon == 174.8803 and type(e.rt) == "number")
 end
 
+-- ---- waypoints and the places near a stop ---------------------------------------------------------------------------------------
+do
+  local M = load()
+  installEarth()
+  M.onExtensionLoaded()
+  M.dropWaypoint()
+  local e = ofType("geoevent")[1] or {}
+  check("the waypoint key sends a waypoint event with where it was pressed", e.name == "waypoint" and e.lat == -41.2258 and e.lon == 174.8803)
+  rawset(_G, "beamngEarth_api", nil)
+  local before = #captured
+  M.dropWaypoint()
+  check("with no BeamNG.Earth the waypoint key does nothing, harmlessly", #captured == before)
+end
+
+local function standingEarth(asks, answer)
+  installEarth({
+    pose = function() return { lat = -41.2, lon = 174.8, alt = 2.5, speed = world.speed or 0, heading = 0 } end,
+    has = function(what) return what == "places" end,
+    places = function(lat, lon, opts, cb) asks[#asks + 1] = { lat = lat, lon = lon, opts = opts }; if answer then cb(answer) end return 1 end,
+  })
+end
+
+do
+  local M = load()
+  local asks = {}
+  standingEarth(asks, { places = { { name = "Z Petone", category = "gas_station" }, { name = "", category = "x" }, { category = "no name" }, { name = "Cafe Roma", category = "cafe" } } })
+  M.onExtensionLoaded()
+  for _ = 1, 19 do M.onUpdate(1) end
+  check("standing still for less than twenty seconds asks for nothing", #asks == 0, #asks)
+  M.onUpdate(1)
+  check("after twenty seconds it asks what is near, once", #asks == 1 and asks[1].lat == -41.2 and asks[1].opts.radius == 100, #asks)
+  local poi = ofType("geopoi")[1] or {}
+  check("and sends the names, with their kind, leaving out ones with none", poi.poi and #poi.poi == 2 and poi.poi[1].n == "Z Petone" and poi.poi[1].c == "gas_station" and poi.poi[2].n == "Cafe Roma", poi.poi and #poi.poi)
+  check("the reading says where it was", poi.lat == -41.2 and poi.lon == 174.8 and type(poi.rt) == "number")
+  for _ = 1, 30 do M.onUpdate(1) end
+  check("a long stop is asked about only once", #asks == 1 and #ofType("geopoi") == 1, #asks)
+  world.speed = 10
+  for _ = 1, 5 do M.onUpdate(1) end
+  world.speed = 0
+  for _ = 1, 20 do M.onUpdate(1) end
+  check("moving off and stopping again is a new stop, asked about again", #asks == 2, #asks)
+end
+
+do
+  local M = load()
+  local asks = {}
+  standingEarth(asks, { places = {} })
+  M.onExtensionLoaded()
+  for _ = 1, 25 do M.onUpdate(1) end
+  check("a stop with nothing near it sends nothing", #asks == 1 and #ofType("geopoi") == 0)
+end
+
+do
+  local M = load()
+  local later
+  installEarth({
+    pose = function() return { lat = -41.2, lon = 174.8, alt = 2.5, speed = 0, heading = 0 } end,
+    has = function(what) return what == "places" end,
+    places = function(lat, lon, opts, cb) later = cb; return 1 end,
+  })
+  M.onExtensionLoaded()
+  for _ = 1, 25 do M.onUpdate(1) end
+  check("nothing is sent until the answer comes", #ofType("geopoi") == 0)
+  later({ places = { { name = "Late Cafe" } }, pending = true })
+  later({ places = { { name = "Second answer" } } })
+  local poi = ofType("geopoi")
+  check("an answer that comes later is sent, and only the first with names", #poi == 1 and poi[1].poi[1].n == "Late Cafe", #poi)
+  later("junk"); later(nil)
+end
+
+do
+  local M = load()
+  local asks = {}
+  installEarth({
+    pose = function() return { lat = -41.2, lon = 174.8, alt = 2.5, speed = 0, heading = 0 } end,
+    has = function() return false end,
+    places = function(lat, lon, opts, cb) asks[#asks + 1] = 1 end,
+  })
+  M.onExtensionLoaded()
+  for _ = 1, 25 do M.onUpdate(1) end
+  check("an Earth without the places feature is not asked", #asks == 0)
+  installEarth({ pose = function() return { lat = -41.2, lon = 174.8, alt = 2.5, speed = 0, heading = 0 } end, has = function() error("boom") end, places = function() error("boom") end })
+  local ok = pcall(function() for _ = 1, 25 do M.onUpdate(1) end end)
+  check("an Earth whose places call fails does not stop the trip log", ok and #ofType("geo") > 0)
+end
+
 -- ---- trouble ---------------------------------------------------------------------------------------------------------------
 do
   local M = load()

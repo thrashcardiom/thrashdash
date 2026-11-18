@@ -38,6 +38,8 @@ The dashboard is drawn on a fixed-size canvas that scales to fit the window. By 
 | **Delete** | Delete the selected saved dashboard (after asking) |
 | **Esc** | Close the menu |
 
+Move the mouse over a dashboard window and three buttons appear at the top right: **Trips** (the same as **T**), **Edit** (the same as **E**) and **Quit**, which stops ThrashDash after asking again (this computer only).
+
 ### The Dashboards menu
 
 Press **D** or click **Dashboards**. From top to bottom:
