@@ -11,7 +11,7 @@
 - **What happened on the way.** Stops (and the places you stopped at), refuels, impacts (marked by how hard you hit, not only by the damage), peak G, how a route you set went, and **waypoints** you drop with a key and add notes to.
 - **A live map.** The Trips page opens each new trip by itself and follows the car; the same map can sit on any dashboard as a widget.
 - **All your driving added up.** A **Stats** view (totals, records, each vehicle's economy), search and favourites, **compare** two drives of the same route, **join** and **cut** trips, delete several at once, **back up** and **restore** the lot, and **import** a drive recorded elsewhere as a GPX file.
-- **Take trips with you.** Download a trip as **GPX** or **KML** (Google Earth), or as **one web page** that anyone can open with nothing installed.
+- **Take trips with you.** Download a trip as **GPX**, **KML** (Google Earth) or **CSV** (a spreadsheet), or as **one web page** that anyone can open with nothing installed.
 - **Popups in the game** when a trip ends (or starts), and ThrashDash can **start BeamNG.Earth for you** (the newest version in a folder) and quit when it closes.
 - **Dashboards**, the original half: a drag-and-drop editor, thirteen widget types, ten ready-made dashboards, four looks, tyres, damage, alerts, trip meters, per-vehicle dashboards, and phones and tablets over your network.
 - **Your windows come back as you left them**, the map window included, and close when ThrashDash does.
@@ -28,6 +28,8 @@
 - [Quick start](#quick-start)
 - [The trip log](#the-trip-log)
 - [The Trips page](#the-trips-page)
+- [Planning a GPS route](#planning-a-gps-route)
+- [Lap and sector timing](#lap-and-sector-timing)
 - [Taking trips with you](#taking-trips-with-you)
 - [Starting BeamNG.Earth with ThrashDash](#starting-beamngearth-with-thrashdash)
 - [Windows: remembering, saving and closing](#windows-remembering-saving-and-closing)
@@ -265,9 +267,10 @@ The waypoint is kept in the trip with where it was. Afterwards, on the Trips pag
 ### Finding a trip
 
 - **Last 7 days** at the top of the list adds up the trips, distance and driving time of the past week.
-- **Stats** (the button at the top of the list) adds up all your finished trips: trips, days driven, distance, driving time, countries, places and fuel used; your **records** (longest trip, longest drive, top speed, highest point, biggest climb, most countries in one trip, each opening its trip); each **vehicle's** trips, distance and average economy; and distance by month. Filter it by when, vehicle and country, as on the all-trips map.
+- **Stats** (the button at the top of the list) adds up all your finished trips: trips, days driven, distance, driving time, countries, places and fuel used; your **records** (longest trip, longest drive, top speed, highest point, biggest climb, most countries in one trip, each opening its trip); each **vehicle's** trips, distance and average economy; and distance by month. Filter it by when, vehicle, country and tag, as on the all-trips map.
 - **Search** (above the list) narrows it to the trips whose name, vehicle or date contain every word you type, in any order. **Esc** clears it.
 - **Star** a trip (the button beside its name) to mark it as a favourite; it gets a star in the list, and **Starred only** appears above the list to show just those. The mark is a line added to the trip's file, like a name.
+- **Tags** are short labels on a trip, such as *Commute* or *Track*. Under a finished trip's header (on the computer running ThrashDash) there is a row of buttons: a fixed set to begin with (**Commute, Tour, Track, Off-road, Test, Event**) that switch on and off, and a **New tag** box for one of your own, which is offered as a button from then on, for every trip. A trip can have up to eight tags of up to 24 letters; typing the name of a fixed tag in any case gives its usual spelling. Tags show under the trip in the list, are found by the search box, and can be filtered: **Tag** above the list, and on the all-trips map and the Stats view (so **Stats with the Track tag chosen** is the totals for your track days). A tag button for one you made disappears when no trip has it any more. Joining two trips gives the result both trips' tags; cutting one gives both halves its tags. Tags are a line added to the trip's file, like a name, so they come with a backup.
 - **Tick boxes** beside each trip (on the computer running ThrashDash) select several at once, to delete them together: see [Deleting several trips at once](#rename-join-cut-and-delete).
 - **Arrow keys:** **Down** from the search box goes to the first trip, then **Up** and **Down** step through the trips and open each one (**Home** and **End** go to the first and last).
 - **Quit** (at the top of the list, this computer only) stops ThrashDash from the Trips window, with an extra click to confirm.
@@ -294,6 +297,16 @@ The **Popups and settings** box (above the list) holds what you can change about
 ### Figures and graph
 
 Distance, time, average and top speed, fuel, climb, damage, weather, time over the limit, stops, refuels and places, as tiles under the map. Stops show on the map as grey dots, refuels as amber ones, impacts as orange "!" pins and waypoints as purple dots; hover one to see where and for how long (or how much, or what you noted); an impact's text says when in the trip, how fast, how hard and where, and clicking it keeps that text open. Below them a **speed and height graph** along the trip with the posted limits drawn on it. Move over it (or touch it) and it shows the speed, distance, time and height at that point and marks the place on the map.
+
+### What a drive cost
+
+Set the price of fuel under **Popups and settings → Fuel price**: per litre, per kWh (for an electric car) and a currency symbol or code (`$`, `NZ$`, `EUR`). Leave a price at 0 for none. **Each trip is given the price as it is when it starts, and keeps it**, so changing the price later never changes what an old drive cost. A trip with a price shows a **Fuel cost** tile (or **Energy cost**) with the cost over 100 km (or 100 miles), worked out from the fuel it used: a trip with no price, or no fuel reading, has no cost, and nothing is guessed. A hybrid's two kinds of energy are not told apart, so it has no cost.
+
+The **Fuel price for this trip** box under a finished trip's tags changes that one trip's price: a trip recorded before you set a price, or one that began with the wrong one. **No price** takes it away. It is a line added to the trip's file, like a name, so it comes with a backup.
+
+**Stats** add the costs up (**Fuel cost**, with how many trips were priced and the cost per 100 km), one tile for each currency if the price was ever in more than one. Trips with no price are left out and counted, so the total is never mistaken for the whole; trips under half a kilometre are left out, as they are from **Fuel used**.
+
+**Download as CSV** (top right of Stats) saves one row for each trip shown, so the filters apply: the id, start time (UTC), name, vehicle, tags, whether it is starred or imported, how it ended, distance, time, moving and stopped time, average and top speed, climb and descent, energy used (with its unit) and per 100 km, the price, the cost and its currency, countries, places, peak G, impacts, body damage at the end, time over the posted limit and refuels. As in the per-trip file, everything is in metres, seconds and metres a second.
 
 ### Replay
 
@@ -343,12 +356,45 @@ What an edit did, or why it could not be done, shows in a line under the trip's 
 
 The **Live map (BeamNG.Earth)** widget puts the same map on any dashboard, placed and sized like a gauge and saved with the dashboard. It follows the trip being driven, turns heading up, and opens each new trip by itself. See [the widget reference](docs/dashboards.md#live-map-beamngearth).
 
+## Planning a GPS route
+
+BeamNG.Earth's own map is the only place to set a GPS route in the game. The **Route** view (the **Route** button at the top of the Trips list) lets you plan one on a big map, on the second monitor, and send it to the game.
+
+1. **Add stops.** Click the map, or press a **saved destination**, or pick a **place from your trips** (where each of your trips began and ended, by name, newest first) and press **Add**. The stops are numbered; the last one is the destination. A route can have up to **11 stops**. Move a stop earlier or later with the arrow buttons, or take it away with ✕. The ☆ beside a stop **saves** it under a name (kept in `destinations.json`), so it is one click away next time.
+2. **Send to the game.** BeamNG.Earth plans the real road route, so ThrashDash cannot show it before sending: the dashed line between your stops is only the order. When the game has taken the stops, the planned route comes back and is drawn (a solid line, the stops on the way in amber and the destination in red), with where it goes, how far and how long. If the game refuses (stops too far apart, say) it says why. The game must be running with the BeamNG.Earth level loaded, and BeamNG restarted since ThrashDash was updated.
+3. **Clear the route in the game** clears it.
+
+**The route line.** ThrashDash draws the line BeamNG.Earth itself planned. Earth takes the road geometry from its routing service and keeps only the points that shape it, to within about 4 m, so a long straight has few points and a bend has many. A route with more than 1,500 points (usually a very long one) is simplified further by shape, so bends are kept while the line can sit a little farther from the road. ThrashDash asks no outside service about your route.
+
+**On the live map.** While a route is set, the map of the trip being driven (the Trips page, and the live map widget on a dashboard) draws it: a dashed line from the car to the destination, a red pin at the destination, and a chip saying where to and how far. It goes when the route does. A trip that has ended shows no route: it is about now.
+
+Only the **computer running ThrashDash** can send or clear a route or save a destination: another device on the network can look at the route but not change it. ThrashDash does not look up addresses (that would send what you type to an outside service): use BeamNG.Earth's own search in the game, or click the map.
+
+## Lap and sector timing
+
+BeamNG has no lap timer in the world BeamNG.Earth streams, so ThrashDash times laps itself, from where the car is. You draw a **circuit** (a few lines across the road) on a drive you have already recorded, and from then on every time the car crosses them the laps are timed, with no further setup.
+
+**Making a circuit.** Open a trip and press **Make a circuit** (or press **Circuits**, then **New circuit**, and pick a trip you drove it on). The trip's route is drawn on a map. Press **Start/finish line**, then click the route where the lap begins: a line is drawn across the road, facing the way you were driving, so it counts the right way round. Press **Add a sector line** and click the route for each split (two lines make three sectors; put them in the order a lap meets them, with the arrow buttons if need be). A **stage** is a run from a start line to a separate finish line, such as a hill climb. **Line width** is how wide a new line is, 30 m to begin with: wide enough to cover the road, not so wide it reaches a neighbouring one. The **⇄** button turns a line round if it counts the wrong way.
+
+**Timing.** All circuits that are switched on are watched at once, and the one whose start line you cross is the one timed. The first crossing only starts the clock: that lap began wherever you were, so it is not timed. After that each crossing of the start line ends a lap and starts the next. A lap needs every sector line crossed in order; one missed (a shortcut) still records the lap, marked **not valid**, and it is never a best. Times are the **game's own time**, so pausing the game mid-lap does not lengthen the lap.
+
+**What spoils a lap.** A reset (R), a teleport, changing car or level, the car's position jumping, or the game going quiet for two seconds, ends the run: the lap in progress is dropped, and the next crossing of the start line starts again. A lap that a reset helped is not a lap.
+
+**How exact is it?** The position arrives ten times a second, which is 3 m apart at 100 km/h. The moment a line is crossed is worked out between the two positions either side of it, so times do not jump in whole tenths of a second. It is still a position fed to a clock by a game: good to a few hundredths of a second, not to the millisecond, and the dashboard shows tenths for that reason.
+
+**Bests are per vehicle**: a hatchback and a supercar do not share a best lap. The gap shown while you drive is against your best lap in the car you are in, measured by how far round you are (so it works without any sector lines, and moves smoothly). Each circuit's page lists its laps, with sector times, the vehicle and the best marked ★. **Change the lines** edits a circuit; because the old laps were timed over other lines, changing them clears the laps (it asks first). Renaming, or the **Time laps here** box, does not.
+
+**On a dashboard** the **Lap timer** widget shows this lap's clock, the gap to your best, the last and best laps, and each sector (purple for a new best). The numbers are also channels (`lap.time`, `lap.delta`, `lap.best`, `lap.s1.last` and so on, under **Lap timing** in the channel picker) for any gauge or readout. See [the widget reference](docs/dashboards.md#lap-timer).
+
+Circuits and laps are kept in the data folder (`circuits.json`, and `laps/`), so they are in your backups of that folder; they are not part of the trips backup zip.
+
 ## Taking trips with you
 
-Three buttons beside a trip's title (any device that can open the page can use them, a phone included):
+Four buttons beside a trip's title (any device that can open the page can use them, a phone included):
 
 - **GPX** is for GPS and mapping programs: a timed track with speed and height, and a start and end point.
 - **KML** is for **Google Earth** (the web version works, and no account or key is needed): the route as a line on the ground with a pin at each end, and the trip's summary when you click it. The times are real, and the path is laid on the ground, so a wrong height cannot bury it in the terrain. The file also holds a timed track for the time slider of the desktop version; it is hidden until you tick it, because Earth would draw it over the line.
+- **CSV** is for a spreadsheet: one row for each recorded point (about one a second) with the time (UTC), position, altitude, speed, heading, distance driven, the speed limit there (and whether it was read from a real sign), the street and town, the fuel (or charge) left, body damage and the strongest force since the previous point. Everything is in **metres, seconds and metres a second**, with the unit in the column's name, so the file does not depend on the units you chose on the page; a figure the game did not give is an empty cell. The file is UTF-8 with a byte order mark (so Excel on Windows reads names with macrons right), and a street name that could be taken for a formula is made plain text.
 - **Share** (for a finished trip) downloads **one `.html` file** holding the route on a map, the figures, the speed graph and the replay, with nothing to install and no ThrashDash needed. Send it by email or chat, or put it on a web server.
   - It is the Trips page's own program joined into one script (not a copy that could drift), with the map library, the styles and the trip's data inside.
   - It contains the trip's **positions**, speeds, heights, name and summary. It leaves out the car's id, fuel and damage readings, and your settings except your units.

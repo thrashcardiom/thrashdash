@@ -20,6 +20,8 @@ from .server import WINDOW_COUNTER, make_app
 from .store import LayoutStore, SettingsStore
 from .triplog import TripLog
 from .configs import ConfigStore
+from .laps import CircuitStore, LapStore, LapTimer
+from .routeplan import DestinationStore, RoutePlanner
 from .windows import WindowRegistry, open_config_windows, open_windows
 from .tripnotice import TripNotices
 from . import earthlaunch
@@ -69,7 +71,10 @@ async def amain(args):
     triplog = None if args.simulate else TripLog(data_dir / "triplog", on_notice=notices.publish)  # where the car has been, from BeamNG.Earth (a simulated run keeps none)
     if triplog is not None:
         triplog.set_idle_end(settings.get()["tripIdleEndMin"] * 60)
-    hub = Hub(simulated=args.simulate, trip_path=None if args.simulate else data_dir / "trips.json", triplog=triplog)  # (the simulator's fake drives are not worth keeping)
+        triplog.price_source = lambda: settings.get()["fuelPrice"]  # (each trip is given the price of fuel as it is when it starts)
+    laps = LapStore(None if args.simulate else data_dir / "laps")  # finished laps and bests (a simulated run keeps none)
+    circuits = CircuitStore(data_dir / "circuits.json", laps)  # the lines that make a circuit; the simulator's lap timing uses the same
+    hub = Hub(simulated=args.simulate, trip_path=None if args.simulate else data_dir / "trips.json", triplog=triplog, lap_timer=LapTimer(circuits, laps))  # (the simulator's fake drives are not worth keeping)
     if triplog is not None:
         triplog.on_change = hub.add_trip_event  # (a page watching the trip list is told the moment a trip starts or ends)
     layouts = LayoutStore(data_dir / "layouts", web_root() / "layouts", on_skip=lambda path, why: print(f"  skipped unreadable layout {path.name}: {why}", file=sys.stderr))
@@ -82,7 +87,7 @@ async def amain(args):
             print("--debug-pin must be 4 to 8 digits", file=sys.stderr)
             return 2
         auth.set_pin(args.debug_pin)
-    app = make_app(hub, args.http_port, layouts, settings, lan=lan, auth=auth, local_check=(lambda remote: False) if args.debug_treat_clients_as_remote else is_local_client, windows=windows, notices=notices, configs=configs)
+    app = make_app(hub, args.http_port, layouts, settings, lan=lan, auth=auth, local_check=(lambda remote: False) if args.debug_treat_clients_as_remote else is_local_client, windows=windows, notices=notices, configs=configs, circuits=circuits, laps=laps, route_planner=RoutePlanner(notices, hub), destinations=DestinationStore(data_dir / "destinations.json"))
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     lan.attach(runner)

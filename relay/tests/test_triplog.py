@@ -513,7 +513,8 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(r.status, 404)
         finally:
             await runner.cleanup()
-        self.assertEqual(body, {"enabled": False, "status": {"recording": False}, "trips": []})
+        self.assertEqual({k: v for k, v in body.items() if k != "presetTags"}, {"enabled": False, "status": {"recording": False}, "trips": []})
+        self.assertIn("Commute", body["presetTags"])  # (the tags offered are the same with or without a log, so the page can build its picker)
 
     async def test_nothing_here_can_be_written_to(self):
         for method in (self.http.post, self.http.put, self.http.delete):

@@ -321,6 +321,10 @@ class LauncherArgsTests(unittest.TestCase):
         for flag in ("--window-position", "--start-fullscreen", "--ozone-platform=x11"):
             self.assertFalse(any(x.startswith(flag) for x in a), flag)
 
+    def test_windows_may_play_the_alert_sound_without_being_clicked_first(self):
+        for platform in ("linux", "win32", "darwin"):
+            self.assertIn("--autoplay-policy=no-user-gesture-required", self.args(platform=platform))
+
     def test_size_position_and_fullscreen(self):
         a = self.args(size=(900, 500), position=(-1920, 40), fullscreen=True)
         self.assertIn("--window-size=900,500", a)

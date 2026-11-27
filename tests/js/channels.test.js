@@ -121,3 +121,18 @@ test("the new groups sort and filter like the others", () => {
   assert.deepEqual(groupChannels(channels, "temperature").tires.map((e) => e.name), ["tire.FL.temp", "tire.FR.temp"]);
   assert.deepEqual(groupChannels(channels, "oil").states.map((e) => e.name), ["state.engine.oilOverheating"]);
 });
+
+test("the road and route channels have names, unit hints and their own picker group", () => {
+  assert.equal(describeChannel("geo.limit"), "Speed limit here");
+  assert.equal(suggestKind("geo.limit"), "speed");
+  assert.equal(suggestKind("geo.route.remaining"), "distance");
+  assert.equal(suggestKind("geo.route.off"), "distance");
+  assert.equal(suggestKind("geo.route.eta"), null);
+  for (const name of ["geo.limit", "geo.limitPosted", "geo.route.active", "geo.route.remaining", "geo.route.eta", "geo.route.off", "geo.route.name"]) {
+    assert.ok(describeChannel(name), name);
+    assert.equal(classifyChannel(name), "geo", name);
+  }
+  const groups = groupChannels({ rpm: "number", "geo.limit": "number", "geo.route.name": "string" });
+  assert.deepEqual(groups.geo.map((e) => e.name).sort(), ["geo.limit", "geo.route.name"]);
+  assert.deepEqual(groups.common.map((e) => e.name), ["rpm"]);
+});

@@ -9,7 +9,8 @@
 
 import { MAX_WIDGETS, freshId, newWidget, sanitizeValue } from "../layoutSchema.js";
 import { scaleSetting } from "../scaling.js";
-import { clampRect } from "./geometry.js";
+import { normaliseColour } from "../theme.js";
+import { alignRects, clampRect, distributeRects } from "./geometry.js";
 
 const HISTORY_LIMIT = 100;
 const COALESCE_MS = 1000;
@@ -222,6 +223,31 @@ export class EditorState {
     this._emit("rect", { ids: [...rects.keys()] });
   }
 
+  /** The selected widgets' rectangles, by id. */
+  _selectedRects() {
+    return new Map(this.selection.map((id) => this.widget(id)).filter(Boolean).map((w) => [w.id, { x: w.x, y: w.y, w: w.w, h: w.h }]));
+  }
+
+  /** Apply new rectangles as ONE undo step, and only if something actually moves. Returns whether it did. */
+  _arrange(next, before) {
+    const moved = new Map([...next].filter(([id, r]) => ["x", "y", "w", "h"].some((k) => r[k] !== before.get(id)[k])));
+    if (!moved.size) return false;
+    this.setRects(moved);
+    return true;
+  }
+
+  /** Line the selected widgets up with each other: mode "left", "centre", "right", "top", "middle" or "bottom". Needs two or more. */
+  alignSelection(mode) {
+    const before = this._selectedRects();
+    return before.size >= 2 && this._arrange(alignRects(before, mode), before);
+  }
+
+  /** Space the selected widgets evenly across ("h") or down ("v"). Needs three or more. */
+  distributeSelection(axis) {
+    const before = this._selectedRects();
+    return before.size >= 3 && this._arrange(distributeRects(before, axis), before);
+  }
+
   /** Nudge the selection. Holding an arrow key coalesces into one undo step. */
   moveBy(dx, dy, ids = this.selection) {
     const targets = ids.map((id) => this.widget(id)).filter(Boolean);
@@ -298,6 +324,32 @@ export class EditorState {
     this._record("scale");
     this.layout.scaleMode = next.mode;
     this.layout.scalePercent = next.percent;
+    this._emit("meta");
+  }
+
+  /**
+   * Set (or, with `undefined`, take away) one colour of the theme. Typing or dragging in a colour picker makes many changes in a row:
+   * they coalesce into one undo step.
+   */
+  setThemeColour(key, value) {
+    const colour = value === undefined ? undefined : normaliseColour(value);
+    if (value !== undefined && !colour) return { ok: false, reason: "not a colour" };
+    const theme = { ...(this.layout.theme ?? {}) };
+    if ((theme[key] ?? undefined) === colour) return { ok: true };
+    this._record(`theme:${key}`);
+    if (colour === undefined) delete theme[key];
+    else theme[key] = colour;
+    if (Object.keys(theme).length) this.layout.theme = theme;
+    else delete this.layout.theme;
+    this._emit("meta");
+    return { ok: true };
+  }
+
+  /** Take the whole theme away. */
+  clearTheme() {
+    if (!this.layout.theme) return;
+    this._record();
+    delete this.layout.theme;
     this._emit("meta");
   }
 

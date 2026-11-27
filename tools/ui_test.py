@@ -1302,11 +1302,11 @@ async def scenarios(b, shots):
     sections = await b.eval("[...document.querySelectorAll('.ed-h2')].map(e => e.textContent)")
     check("the editor has an Alerts section", "Alerts" in sections, str(sections))
     boxes = await b.eval("[...document.querySelectorAll('.al-opt input')].map(i => i.dataset.alert + ':' + i.checked)")
-    check("every alert is offered and on by default", len(boxes) == 10 and all(x.endswith(":true") for x in boxes), str(boxes))
+    check("every alert is offered, on by default except leaving the route", len(boxes) == 12 and [x for x in boxes if not x.endswith(":true")] == ["offRoute:false"], str(boxes))
     await b.eval("document.querySelector('.al-opt input[data-alert=fuel]').click()")
     await p.settle(0.6)
     saved = api("GET", "/api/settings")["alerts"]
-    check("switching one alert off is saved by the relay", saved == {"enabled": True, "off": ["fuel"]}, str(saved))
+    check("switching one alert off is saved by the relay", saved == {"enabled": True, "off": ["fuel"], "on": []}, str(saved))
     await b.eval("[...document.querySelectorAll('.ed-section')].find(s => s.querySelector('.ed-h2').textContent === 'Alerts').querySelector('.pr-check-row input').click()")
     await p.settle(0.6)
     saved = api("GET", "/api/settings")["alerts"]
@@ -1316,6 +1316,221 @@ async def scenarios(b, shots):
     await p.click_text(".ed-bar .btn", "Done")
     await p.settle(0.8)
     check("no console errors from alerts", not [m for m in b.console if m[0] == "error"] and not b.errors, str(b.console[-2:]))
+
+    print("\n== road and route")
+    world_id = api("POST", "/api/layouts", {"format": 1, "name": "World", "width": 800, "height": 300, "widgets": [
+        {"id": "lim", "type": "speedlimit", "x": 10, "y": 10, "w": 200, "h": 240, "speedChannel": "wheelspeed", "style": "round", "showSpeed": True},
+        {"id": "lim2", "type": "speedlimit", "x": 220, "y": 10, "w": 160, "h": 200, "speedChannel": "wheelspeed", "style": "box", "showSpeed": False},
+        {"id": "rt", "type": "route", "x": 400, "y": 10, "w": 300, "h": 260, "showName": True, "showOff": True}]})["id"]
+    api("PUT", "/api/settings", {"alerts": {"enabled": True, "off": []}})
+    await b.goto(BASE + f"/?d={world_id}", wait=2.0)
+    check("the speed limit signs and the route panel are drawn", await p.count("#widgets > .w-limit") == 2 and await p.count("#widgets > .w-route") == 1)
+    check("the box sign has its heading and the round one has none", await b.eval("document.querySelectorAll('.lm-box .lm-top').length") == 1 and await b.eval("document.querySelectorAll('.lm-round .lm-top').length") == 0)
+    # The simulator has a posted limit for most of its 40 s drive, and a route for the first 30 s of each minute.
+    state = None
+    for _ in range(160):
+        state = await b.eval("""(() => ({
+          num: document.querySelector('.lm-round .lm-num').textContent,
+          cls: document.querySelector('.lm-round').className,
+          now: document.querySelector('.lm-round .lm-now')?.textContent,
+          dest: document.querySelector('.rt-dest').textContent,
+          banner: [...document.querySelectorAll('#alerts .al-item')].map(e => e.textContent),
+          limitChannel: document.querySelector('.lm-round .lm-num').textContent }))()""")
+        if state["num"] != "--" and "over" in state["cls"] and any("speed limit" in x for x in state["banner"]):
+            break
+        await asyncio.sleep(0.5)
+    check("the sign shows a limit in km/h and the car's own speed", state["num"] in ("50", "80", "100") and state["now"].endswith("km/h"), str(state))
+    check("it turns red when the car is over a posted limit", "over" in state["cls"] and "estimated" not in state["cls"], str(state))
+    check("the banner says so, naming the limit", any(x == f"Over the speed limit ({state['num']} km/h)" for x in state["banner"]), str(state))
+    await p.shot("world-over-limit")
+    # A guessed limit never turns the sign red or raises the alert: wait for the simulator's 'estimated' stretch.
+    guess = None
+    for _ in range(120):
+        guess = await b.eval("""(() => ({ cls: document.querySelector('.lm-round').className, cap: document.querySelector('.lm-cap').textContent,
+                                        banner: [...document.querySelectorAll('#alerts .al-item')].map(e => e.textContent) }))()""")
+        if "estimated" in guess["cls"]:
+            break
+        await asyncio.sleep(0.25)
+    check("a guessed limit is drawn as an estimate, never red", "estimated" in guess["cls"] and "over" not in guess["cls"] and guess["cap"] == "est.", str(guess))
+    route = None
+    for _ in range(120):
+        route = await b.eval("[...document.querySelectorAll('.rt-value')].map(e => e.textContent).concat(document.querySelector('.rt-dest').textContent)")
+        if route[-1] == "Oriental Bay":
+            break
+        await asyncio.sleep(0.5)
+    check("the route panel shows the destination, the arrival time and what is left", route[-1] == "Oriental Bay" and ":" in route[0] and route[1].endswith("min") and route[2].endswith("km"), str(route))
+    nxt = None
+    for _ in range(40):
+        nxt = await b.eval("(() => { const n = document.querySelector('.rt-next'); return n && !n.hidden ? [n.querySelector('.rt-arrow').textContent, n.querySelector('.rt-ndist').textContent, n.querySelector('.rt-ntext').textContent] : null; })()")
+        if nxt:
+            break
+        await asyncio.sleep(0.5)
+    sim_words = {"Turn left onto Oriental Parade", "At the roundabout take the 2nd exit onto Evans Bay Parade", "Bear right onto Rongotai Road", "Keep left at the fork onto Cobham Drive", "Arrive: your destination is on the left"}
+    check("the route panel shows the next turn: an arrow, how far, and in words", nxt is not None and nxt[2] in sim_words and re.fullmatch(r"Now|\d+ m|\d\.\d km", nxt[1]) is not None and nxt[0] != "", str(nxt))
+    await p.shot("route-next-turn")
+    for _ in range(140):  # the simulator clears the route after 30 s
+        route = await b.eval("document.querySelector('.rt-dest').textContent")
+        if route == "No route set":
+            break
+        await asyncio.sleep(0.5)
+    check("with no route it says so and dims", route == "No route set" and await b.eval("document.querySelector('.w-route').classList.contains('missing')"), str(route))
+    check("and the next turn goes with the route", await b.eval("document.querySelector('.rt-next').hidden") is True)
+
+    print("\n== road and route: switching the alert off")
+    await b.key("e")
+    await p.settle(0.9)
+    check("the editor offers the over-limit alert and its margin", await b.eval("!!document.querySelector('.al-opt input[data-alert=overLimit]')") and "Over-limit margin (km/h)" in await b.eval("[...document.querySelectorAll('.gf-label')].map(e => e.textContent).join('|')"))
+    margin = await b.eval("[...document.querySelectorAll('.gf')].find(g => g.textContent.startsWith('Over-limit margin')).querySelector('input').value")
+    check("the margin starts at 5 km/h", margin == "5", str(margin))
+    await b.eval("""(() => { const i = [...document.querySelectorAll('.gf')].find(g => g.textContent.startsWith('Over-limit margin')).querySelector('input'); i.value = '20'; i.dispatchEvent(new Event('change', {bubbles: true})); })()""")
+    await p.settle(0.6)
+    saved = api("GET", "/api/settings")["alerts"]
+    check("a margin typed in km/h is saved in metres a second", abs(saved.get("limitMargin", 0) - 20 / 3.6) < 0.01, str(saved))
+    await b.eval("document.querySelector('.al-opt input[data-alert=overLimit]').click()")
+    await p.settle(0.6)
+    saved = api("GET", "/api/settings")["alerts"]
+    check("switching just that alert off is saved, and the margin box is greyed out", saved["off"] == ["overLimit"] and await b.eval("[...document.querySelectorAll('.gf')].find(g => g.textContent.startsWith('Over-limit margin')).querySelector('input').disabled"), str(saved))
+    await p.click_text(".ed-bar .btn", "Done")
+    await p.settle(0.5)
+    await asyncio.sleep(3.5)  # past the 2.5 s hold-over
+    banner = await b.eval("[...document.querySelectorAll('#alerts .al-item')].map(e => e.textContent)")
+    check("the banner no longer mentions the limit even while the sign is red", not any("speed limit" in x for x in banner), str(banner))
+    api("PUT", "/api/settings", {"alerts": {"enabled": True, "off": [], "limitMargin": 5 / 3.6}})
+    api("DELETE", f"/api/layouts/{world_id}")
+    check("no console errors from the road and route widgets", not [m for m in b.console if m[0] == "error"] and not b.errors, str(b.console[-2:]))
+
+    print("\n== marquee, align and distribute")
+    arr_id = api("POST", "/api/layouts", {"format": 1, "name": "Arrange", "width": 1000, "height": 500, "widgets": [
+        {"id": "wa", "type": "gear", "x": 60, "y": 60, "w": 120, "h": 80, "channel": "gear"},
+        {"id": "wb", "type": "gear", "x": 320, "y": 140, "w": 120, "h": 80, "channel": "gear"},
+        {"id": "wc", "type": "gear", "x": 600, "y": 80, "w": 120, "h": 80, "channel": "gear"},
+        {"id": "wd", "type": "gear", "x": 300, "y": 380, "w": 120, "h": 80, "channel": "gear"}]})["id"]
+    await b.resize(1500, 800)
+    await b.goto(BASE + f"/?d={arr_id}", wait=2.0)
+    await b.key("e")
+    await p.settle(0.9)
+
+    async def selected():
+        return sorted(await b.eval("[...document.querySelectorAll('.ef.sel')].map(e => e.dataset.id)"))
+
+    ra, rb, rc, rd = [await p.frame(w) for w in ("wa", "wb", "wc", "wd")]
+    await b.drag(ra["x"] - 25, ra["y"] - 25, rb["x"] + rb["w"] - 10, rb["y"] + rb["h"] - 10)
+    await p.settle(0.3)
+    check("dragging a box over empty canvas selects the widgets it touches", await selected() == ["wa", "wb"], str(await selected()))
+    check("the box is gone when the mouse is released", await p.count(".ed-marquee") == 0)
+    check("the panel offers Align (six ways) and Space evenly, the latter needing three", await p.count("[data-align]") == 6 and await b.eval("document.querySelector('[data-distribute=h]').disabled") is True)
+    await b.drag(rc["x"] - 25, rc["y"] - 25, rc["x"] + rc["w"] + 25, rc["y"] + rc["h"] + 25, modifiers=SHIFT)
+    await p.settle(0.3)
+    check("a box drawn with Shift adds to the selection", await selected() == ["wa", "wb", "wc"], str(await selected()))
+    await b.click(rd["x"] + rd["w"] + 150, rd["y"] + rd["h"] + 20)
+    await p.settle(0.2)
+    check("a plain click on empty canvas clears it", await selected() == [])
+    await b.drag(ra["x"] - 25, ra["y"] - 25, rb["x"] + rb["w"] - 10, rb["y"] + rb["h"] - 10)
+    await b.drag(rc["x"] - 25, rc["y"] - 25, rc["x"] + 60, rc["y"] + 60, release=False, modifiers=SHIFT)
+    await p.settle(0.2)
+    during = await selected()
+    await b.key("Escape")
+    await b.mouse("mouseReleased", rc["x"] + 60, rc["y"] + 60)
+    await p.settle(0.3)
+    check("while the box is being drawn the selection follows it", during == ["wa", "wb", "wc"], str(during))
+    check("Esc puts the selection back as it was, and the box is gone", await selected() == ["wa", "wb"] and await p.count(".ed-marquee") == 0, str(await selected()))
+
+    await b.key("a", CTRL)
+    await p.settle(0.3)
+    await b.eval("document.querySelector('[data-align=left]').click()")
+    await p.settle(0.3)
+    xs = [(await p.widget_geo(w))["x"] for w in ("wa", "wb", "wc", "wd")]
+    check("Align left lines every selected widget up on the leftmost edge", xs == [60, 60, 60, 60], str(xs))
+    await b.key("z", CTRL)
+    await p.settle(0.3)
+    xs = [(await p.widget_geo(w))["x"] for w in ("wa", "wb", "wc", "wd")]
+    check("and it is one undo step", xs == [60, 320, 600, 300], str(xs))
+    await b.eval("document.querySelector('[data-align=bottom]').click()")
+    await p.settle(0.3)
+    bottoms = [(await p.widget_geo(w))["y"] + (await p.widget_geo(w))["h"] for w in ("wa", "wb", "wc", "wd")]
+    check("Align bottom lines up the bottom edges", bottoms == [460, 460, 460, 460], str(bottoms))
+    await b.key("z", CTRL)
+    await p.settle(0.3)
+    await b.drag(ra["x"] - 25, ra["y"] - 25, rc["x"] + rc["w"] + 25, rb["y"] + rb["h"] + 25)  # a, b, c (not d)
+    await p.settle(0.3)
+    check("three widgets can be spaced", await selected() == ["wa", "wb", "wc"] and await b.eval("document.querySelector('[data-distribute=h]').disabled") is False, str(await selected()))
+    await b.eval("document.querySelector('[data-distribute=h]').click()")
+    await p.settle(0.3)
+    xs = [(await p.widget_geo(w))["x"] for w in ("wa", "wb", "wc")]
+    check("Space evenly across keeps the outer two and puts the middle one halfway", xs == [60, 330, 600], str(xs))
+    check("the widget that was not selected did not move", (await p.widget_geo("wd"))["x"] == 300)
+
+    print("\n== colours (the theme)")
+    sections = await b.eval("[...document.querySelectorAll('.ed-h2')].map(e => e.textContent)")
+    check("the editor has a Colours section", "Colours" in sections, str(sections))
+    check("with a picker for each of the seven colours", await p.count("input[data-theme]") == 7)
+    await b.eval("(() => { const i = document.querySelector('input[data-theme=accent]'); i.value = '#ff0000'; i.dispatchEvent(new Event('input', {bubbles: true})); })()")
+    await b.eval("(() => { const i = document.querySelector('input[data-theme=bg]'); i.value = '#102030'; i.dispatchEvent(new Event('input', {bubbles: true})); })()")
+    await p.settle(0.4)
+    check("choosing a colour changes the dashboard at once (on the canvas, so the editor stays readable)", await b.eval("document.getElementById('canvas').style.getPropertyValue('--accent')") == "#ff0000" and await b.eval("getComputedStyle(document.querySelector('.ed-panel')).getPropertyValue('--accent').trim()") != "#ff0000")
+    check("the page behind it takes the background colour", "rgb(16, 32, 48)" in (await b.eval("document.body.style.background") or ""), await b.eval("document.body.style.background"))
+    check("it is an unsaved change to the dashboard", "Unsaved" in await p.text(".ed-dirty"))
+    check("a colour that was changed can be put back, and the others stay", await b.eval("!document.querySelector('[data-theme-reset=accent]').disabled && document.querySelector('[data-theme-reset=text]').disabled"))
+    await b.eval("document.querySelector('[data-theme-reset=accent]').click()")
+    await p.settle(0.3)
+    check("Default takes that colour off again", await b.eval("document.getElementById('canvas').style.getPropertyValue('--accent')") == "")
+    await b.eval("(() => { const i = document.querySelector('input[data-theme=panel]'); i.value = '#203040'; i.dispatchEvent(new Event('input', {bubbles: true})); })()")
+    await p.settle(0.3)
+    await b.key("s", CTRL)  # (Save)
+    await p.settle(1.0)
+    saved_theme = api("GET", f"/api/layouts/{arr_id}")["layout"].get("theme")
+    check("Save keeps the theme in the dashboard", saved_theme == {"bg": "#102030", "panel": "#203040"}, str(saved_theme))
+    await b.key("e")
+    await p.settle(0.6)
+    await b.goto(BASE + f"/?d={arr_id}", wait=2.0)
+    check("and a window that opens it later has the colours", await b.eval("document.getElementById('canvas').style.getPropertyValue('--panel')") == "#203040")
+    await b.goto(BASE + "/?d=default", wait=1.5)
+    check("another dashboard is not coloured by it", await b.eval("document.getElementById('canvas').style.getPropertyValue('--panel')") == "" and await b.eval("document.body.style.background") == "")
+    await b.goto(BASE + f"/?d={arr_id}", wait=1.5)
+    await b.key("e")
+    await p.settle(0.8)
+    await b.eval("document.querySelector('.ed-scroll').querySelectorAll('button').forEach(x => { if (x.textContent === 'Reset all colours') x.click(); })")
+    await p.settle(0.3)
+    check("Reset all colours takes the whole theme off", await b.eval("document.getElementById('canvas').style.getPropertyValue('--panel')") == "" and await b.eval("document.body.style.background") == "")
+    await b.key("z", CTRL)
+    await p.settle(0.3)
+    check("and Undo brings it back", await b.eval("document.getElementById('canvas').style.getPropertyValue('--panel')") == "#203040")
+    await b.goto(BASE + "/?d=default", wait=1.0)  # (away from it first: deleting a dashboard that a page still has open is its own 404)
+    api("DELETE", f"/api/layouts/{arr_id}")
+
+    print("\n== the alert sound")
+    await b.goto(BASE + "/?d=default", wait=2.0)
+    await b.key("e")
+    await p.settle(0.9)
+    check("the Alerts section offers a sound, off to begin with", await b.eval("document.querySelector('[data-sound-on]') !== null && !document.querySelector('[data-sound-on]').checked") is True and await b.eval("document.querySelector('[data-sound-volume]').disabled") is True)
+    await b.eval("window.__osc = 0; window.__AC = window.AudioContext || window.webkitAudioContext; const make = window.__AC.prototype.createOscillator; window.__AC.prototype.createOscillator = function () { window.__osc++; return make.call(this); };")
+    await b.click_el("[data-sound-on]")  # (a real click: the user's gesture a browser wants before it lets sound through)
+    await p.settle(0.5)
+    check("switching it on is remembered in this browser, not by the relay", json.loads(await b.eval("localStorage.getItem('thrashdash.alertsound')") or "{}").get("on") is True and "alertsound" not in json.dumps(api("GET", "/api/settings")))
+    check("and the volume control comes alive", await b.eval("!document.querySelector('[data-sound-volume]').disabled") is True)
+    await b.eval("document.querySelector('[data-sound-volume]').value = '0.2'; document.querySelector('[data-sound-volume]').dispatchEvent(new Event('input', {bubbles: true}))")
+    check("the volume is remembered too", json.loads(await b.eval("localStorage.getItem('thrashdash.alertsound')")).get("volume") == 0.2)
+    before = await b.eval("window.__osc")
+    await p.click_text(".btn", "Test: critical")
+    await p.settle(0.3)
+    check("the Test buttons play a chime (two notes for a critical alert)", await b.eval("window.__osc") - before == 2, str(await b.eval("window.__osc") - before))
+    # the simulator raises an alert every minute or so: a NEW one chimes, once
+    chimed = 0
+    for _ in range(170):
+        chimed = await b.eval("window.__osc") - before - 2
+        if chimed > 0:
+            break
+        await asyncio.sleep(0.5)
+    check("a new alert on the dashboard chimes", chimed > 0, str(chimed))
+    await b.click_el("[data-sound-on]")
+    await p.settle(0.4)
+    seen = await b.eval("window.__osc")
+    await asyncio.sleep(3.0)
+    check("switched off again, it stays quiet", json.loads(await b.eval("localStorage.getItem('thrashdash.alertsound')")).get("on") is False and await b.eval("window.__osc") == seen)
+    await b.eval("localStorage.removeItem('thrashdash.alertsound')")
+    await b.key("e")
+    await p.settle(0.5)
+    check("no console errors from the editor additions", not [m for m in b.console if m[0] == "error"] and not b.errors, str(b.console[-2:]))
 
     print("\n== window memory")
     await b.resize(1100, 600)
@@ -1786,15 +2001,26 @@ async def trips_scenario(b, p):
         check("it says how many trips", "2 trips" in await p.text("#ov-sub"), await p.text("#ov-sub"))
         check("the trips are drawn on the map", await b.eval("document.querySelectorAll('#ovmap canvas').length") >= 1 and await p.count("#ovmap .leaflet-tile") > 0)
         check("the filters offer the vehicle and country that occur", await b.eval("[...document.getElementById('f-vehicle').options].map(o => o.value).join('|')") == "|etkc" and await b.eval("[...document.getElementById('f-country').options].map(o => o.value).join('|')") == "|New Zealand")
+        # The date filters work from today, so they get a trip from an hour ago beside the two fixed ones, and the numbers expected are
+        # worked out when the test runs (fixed dates stop being "recent" a week after they were written).
+        now = int(time.time())
+        recent_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now - 3600))
+        _seed_trip(folder, recent_id, now - 3600, -41.31, 174.76, speeding=False)
+        seeded = (now - 3600, 1794604000, 1763000000)
+        this_week = sum(1 for ts in seeded if ts >= now - 7 * 86400)
+        this_year = sum(1 for ts in seeded if ts >= time.mktime((time.localtime(now).tm_year, 1, 1, 0, 0, 0, 0, 0, -1)))
+        await b.goto(base + "/trips#all", wait=2.5)
         await b.eval("document.getElementById('f-when').value = '7'; document.getElementById('f-when').dispatchEvent(new Event('change'))")
         await p.settle(0.3)
-        check("the date filter keeps only the recent trip and the totals follow", "1 of 2 trips" in await p.text("#ov-sub") and await p.text("#ov-tiles .tile .tile-value") == "1", await p.text("#ov-sub"))
+        check("the date filter keeps only the recent trips and the totals follow", this_week < 3 and f"{this_week} of 3 trips" in await p.text("#ov-sub") and await p.text("#ov-tiles .tile .tile-value") == str(this_week), f"expected {this_week}: {await p.text('#ov-sub')}")
         await b.eval("document.getElementById('f-when').value = 'year'; document.getElementById('f-when').dispatchEvent(new Event('change'))")
         await p.settle(0.3)
-        check("this year leaves out the older one too", "1 of 2 trips" in await p.text("#ov-sub"), await p.text("#ov-sub"))
+        check("this year leaves out the trips of earlier years", this_year < 3 and f"{this_year} of 3 trips" in await p.text("#ov-sub"), f"expected {this_year}: {await p.text('#ov-sub')}")
         await b.eval("document.getElementById('f-when').value = 'all'; document.getElementById('f-when').dispatchEvent(new Event('change'))")
         await p.settle(0.3)
-        check("and clearing it brings them back", "2 trips" in await p.text("#ov-sub"))
+        check("and clearing it brings them back", "3 trips" in await p.text("#ov-sub"), await p.text("#ov-sub"))
+        (folder / f"{recent_id}.jsonl").unlink()  # (the later checks expect the two trips)
+        await b.goto(base + "/trips#all", wait=2.5)
         check("the address records the view", await b.eval("location.hash") == "#all")
         await b.eval("document.querySelector('#overview .base button[data-base=sat]').click()")
         await p.settle(0.4)
@@ -1886,7 +2112,7 @@ async def trips_scenario(b, p):
         trips_id = await b.eval("new URLSearchParams(location.search).get('w')")
         check("the Trips (map) window reports itself like a dashboard window, with its own id in its address", bool(trips_id) and windows.get(trips_id, {}).get("kind") == "trips" and (windows[trips_id].get("width") or 0) > 300, str(windows.get(trips_id)))
         await b.eval("document.querySelector('.popups').open = true")
-        check("the popup checkboxes are labelled as popup messages", "Popup messages" in await b.eval("document.querySelector('.pop-group legend').textContent") and await b.eval("document.querySelectorAll('.pop-group input[type=checkbox]').length") == 3)
+        check("the popup checkboxes are labelled as popup messages", "Popup messages" in await b.eval("document.querySelector('.pop-group legend').textContent") and await b.eval("[...document.querySelectorAll('.pop-group')].find(f => f.querySelector('legend').textContent === 'Popup messages').querySelectorAll('input[type=checkbox]').length") == 3)
 
         print("\n== map size: drag, click, fill the window")
         await b.resize(1280, 900)
@@ -2143,6 +2369,496 @@ async def trips_scenario(b, p):
             check("the dashboard's own policy allowed the frame and nothing was refused", not [m for m in b.console if "Refused to frame" in m[1] or "frame-src" in m[1]])
         finally:
             game2.close()
+
+        print("\n== circuits: lines drawn on a trip, and laps timed on them")
+        circuit_mark = len(b.console)
+        listing = json.load(urllib.request.urlopen(base + "/api/triplog", timeout=5))["trips"]
+        done = [t for t in listing if t.get("ended") and (t.get("distance") or 0) > 1000]
+        check("the test relay has a finished drive to draw on", bool(done), str(listing)[:200])
+        trip_id = done[-1]["id"] if done else "20261113T210639Z"
+        await b.resize(1280, 1100)
+        await b.goto(base + f"/trips?debug=1#{trip_id}", wait=2.5)
+        check("the trip has a Make a circuit button", await b.eval("document.getElementById('make-circuit').hidden") is False)
+        check("and so has the page a Circuits button", await b.eval("!!document.getElementById('circuits-btn')") is True)
+        await b.eval("document.getElementById('make-circuit').click()")
+        await p.settle(1.5)
+        check("it opens the editor on that trip", await b.eval("document.getElementById('circuits').hidden") is False and await b.eval("document.getElementById('cir-editor').hidden") is False and await b.eval("document.getElementById('cir-trip').value") == trip_id)
+        check("the trip's route is drawn to place the lines on", (await b.eval("__circuitsDebug.routeLength()")) > 20)
+        check("the other views stepped aside", await b.eval("['detail','overview','stats','compare-view'].every(i => document.getElementById(i).hidden)") is True)
+
+        async def click_route(index):
+            await b.eval("document.getElementById('cirmap').scrollIntoView({block: 'center'})")
+            await asyncio.sleep(0.2)
+            pt = await b.eval(f"__circuitsDebug.routePoint({index})")
+            await b.click(pt["x"], pt["y"])
+            await p.settle(0.3)
+
+        await b.eval("document.getElementById('cir-start-tool').click()")
+        check("pressing a line button arms it and says where to click", await b.eval("document.getElementById('cir-start-tool').getAttribute('aria-pressed')") == "true" and "Click the route" in await p.text("#cir-note"), await p.text("#cir-note"))
+        await b.eval("document.getElementById('cirmap').scrollIntoView({block: 'center'})")
+        corner = await b.eval("(() => { const r = document.getElementById('cirmap').getBoundingClientRect(); return {x: r.left + 6, y: r.top + 6}; })()")
+        await b.click(corner["x"], corner["y"])
+        await p.settle(0.3)
+        check("a click away from the route places nothing and says so", await b.eval("__circuitsDebug.draft().start") is None and "not on the route" in await p.text("#cir-note"), await p.text("#cir-note"))
+        await click_route(8)
+        draft = await b.eval("__circuitsDebug.draft()")
+        check("a click on the route places the start line, and puts the tool down", draft["start"] is not None and await b.eval("document.getElementById('cir-start-tool').getAttribute('aria-pressed')") == "false")
+        crossing = await b.eval("""(async () => {
+          const g = await import('/js/trips/gates.js'); const d = __circuitsDebug.draft();
+          const c = g.gateCentre(d.start);
+          const south = [c[0] - 0.0001, c[1]], north = [c[0] + 0.0001, c[1]];
+          return { forwards: g.crossesGate(south, north, d.start), backwards: g.crossesGate(north, south, d.start), bearing: Math.round(g.travelBearing(d.start)) % 360, length: Math.round(g.gateLengthM(d.start)) };
+        })()""")
+        check("the line counts the way the drive went (north), not the way back", crossing["forwards"] is not None and crossing["backwards"] is None and crossing["bearing"] in (0, 360), str(crossing))
+        check("it is as wide as the Line width box says", crossing["length"] == 30, str(crossing))
+        await b.eval("document.getElementById('cir-sector-tool').click()")
+        await click_route(16)
+        await click_route(22)
+        check("sector lines can be placed one after another (the tool stays armed)", len((await b.eval("__circuitsDebug.draft()"))["sectors"]) == 2 and await b.eval("document.getElementById('cir-sector-tool').getAttribute('aria-pressed')") == "true")
+        await b.eval("document.getElementById('cir-sector-tool').click()")  # put the tool down
+        labels = await b.eval("[...document.querySelectorAll('#cir-gates .cir-gate-label')].map(e => e.textContent)")
+        check("the lines are listed in lap order", labels == ["Start / finish", "S1", "S2"], str(labels))
+        first = (await b.eval("__circuitsDebug.draft()"))["sectors"]
+        await b.eval("document.querySelectorAll('#cir-gates .cir-gate')[2].querySelector('button[aria-label=\"S2: earlier\"]').click()")
+        swapped = (await b.eval("__circuitsDebug.draft()"))["sectors"]
+        check("a sector line can be moved earlier in the order", swapped == [first[1], first[0]])
+        await b.eval("document.querySelectorAll('#cir-gates .cir-gate')[2].querySelector('button[aria-label=\"S2: earlier\"]').click()")  # (back as it was)
+        await b.eval("(() => { const k = document.getElementById('cir-kind'); k.value = 'stage'; k.dispatchEvent(new Event('change', {bubbles: true})); })()")
+        check("choosing a stage offers a finish line, and asks for it", await b.eval("document.getElementById('cir-finish-tool').hidden") is False and "finish line" in (await p.text("#cir-problems")).lower(), await p.text("#cir-problems"))
+        await b.eval("document.getElementById('cir-finish-tool').click()")
+        await click_route(28)
+        check("a stage's finish line is placed the same way", (await b.eval("__circuitsDebug.draft()"))["finish"] is not None)
+        await b.eval("window.scrollTo(0, 0); document.querySelector('#main').scrollTo(0, 0)")
+        await p.shot("circuits-editor")
+        await b.eval("document.getElementById('cir-save').click()")
+        await p.settle(0.3)
+        check("it cannot be saved without a name", "name" in (await p.text("#cir-note")).lower() or "name" in (await p.text("#cir-problems")).lower(), await p.text("#cir-note"))
+        await b.eval("(() => { const n = document.getElementById('cir-name'); n.value = 'Test <b>hill</b>'; n.dispatchEvent(new Event('input', {bubbles: true})); })()")
+        await b.eval("document.getElementById('cir-save').click()")
+        await p.settle(1.2)
+        saved = json.load(urllib.request.urlopen(base + "/api/circuits", timeout=5))["circuits"]
+        check("saving puts the circuit on the relay with its lines", len(saved) == 1 and saved[0]["kind"] == "stage" and len(saved[0]["sectors"]) == 2 and "finish" in saved[0] and saved[0]["name"] == "Test <b>hill</b>", str(saved)[:300])
+        check("the list shows it, plain text not markup, with what it is", "Test <b>hill</b>" in await p.text(".cir-item-name") and "Stage, 3 sectors" in await p.text(".cir-item-sub") and await b.eval("document.querySelectorAll('#cir-list b').length") == 0)
+        check("and the editor has closed on its laps", await b.eval("document.getElementById('cir-editor').hidden") is True and "No laps yet" in await p.text("#cir-laps"))
+        circuit_id = saved[0]["id"]
+
+        # -- a drive over the lines, as the game would report it: positions with the game's own clock (100 m/s, ten a second)
+        lat0 = -41.29 if trip_id == "20261113T210639Z" else (json.load(urllib.request.urlopen(base + f"/api/triplog/{trip_id}", timeout=5))["points"][0]["la"])
+        lon0 = json.load(urllib.request.urlopen(base + f"/api/triplog/{trip_id}", timeout=5))["points"][0]["lo"]
+        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        try:
+            for i in range(0, 120):
+                t = 900.0 + i / 10
+                lat = lat0 + (i * 10 / 111194.9)  # ten metres a step: 100 m/s
+                sock.sendto(json.dumps({"v": 1, "type": "geolive", "rt": t, "st": t, "lat": lat, "lon": lon0, "hdg": 0.0, "spd": 100.0}).encode(), ("127.0.0.1", udp))
+                await asyncio.sleep(0.004)
+        finally:
+            sock.close()
+        await p.settle(0.8)
+        laps = json.load(urllib.request.urlopen(base + f"/api/circuits/{circuit_id}/laps", timeout=5))
+        check("driving over the start, both sector lines and the finish records a valid run", len(laps["laps"]) == 1 and laps["laps"][0]["ok"] is True and len(laps["laps"][0]["s"]) == 3, str(laps)[:300])
+        check("its time is the distance between the lines at the speed driven", abs(laps["laps"][0]["t"] - (28 - 8) * 0.0003 * 111194.9 / 100.0) < 0.15, str(laps["laps"][0]))
+        await b.eval(f"document.querySelector('.cir-item[data-id=\"{circuit_id}\"]').click()")
+        await p.settle(0.8)
+        row = await b.eval("[...document.querySelectorAll('#cir-laps tbody tr:first-child td')].map(e => e.textContent)")
+        await p.shot("circuits-laps")
+        check("the circuit page lists the lap, with its sectors, as the best", len(row) >= 6 and row[1].endswith("\u2605") and row[0] == "1", str(row))
+        check("the list shows the best time", "Best:" in await p.text(".cir-item-sub", 1), await p.text(".cir-item-sub", 1))
+
+        # -- changing the lines clears the laps, and asks first
+        await b.eval("[...document.querySelectorAll('#cir-actions button')].find(b => b.textContent === 'Change the lines').click()")
+        await p.settle(1.0)
+        check("Change the lines reopens the editor with what was saved", await b.eval("document.getElementById('cir-editor').hidden") is False and await b.eval("document.getElementById('cir-name').value") == "Test <b>hill</b>" and len((await b.eval("__circuitsDebug.draft()"))["sectors"]) == 2)
+        await b.eval("document.querySelectorAll('#cir-gates .cir-gate')[0].querySelector('button[aria-label$=\"count the other way\"]').click()")
+        await b.eval("document.getElementById('cir-save').click()")
+        await p.settle(0.4)
+        check("saving different lines asks first, saying the laps would go", "clears this circuit" in await p.text("#cir-note") and "Clear 1 lap" in await p.text("#cir-save"), await p.text("#cir-note"))
+        check("nothing was changed yet", json.load(urllib.request.urlopen(base + f"/api/circuits/{circuit_id}/laps", timeout=5))["laps"] != [])
+        await b.eval("document.getElementById('cir-save').click()")
+        await p.settle(1.0)
+        after = json.load(urllib.request.urlopen(base + f"/api/circuits/{circuit_id}/laps", timeout=5))
+        check("pressing again saves the flipped line and clears the laps", after["laps"] == [] and after["circuit"]["start"]["a"] != saved[0]["start"]["a"], str(after)[:200])
+
+        # -- a rename keeps the laps; switching it off is saved at once
+        await b.eval("document.querySelector('#cir-actions input[type=checkbox]').click()")
+        await p.settle(0.8)
+        check("the Time laps here box is saved at once", json.load(urllib.request.urlopen(base + "/api/circuits", timeout=5))["circuits"][0]["enabled"] is False and "off" in await p.text(".cir-off"))
+
+        # -- clearing and deleting both ask twice
+        await b.eval("[...document.querySelectorAll('#cir-actions button')].find(b => b.textContent === 'Delete').click()")
+        check("Delete asks before it deletes", len(json.load(urllib.request.urlopen(base + "/api/circuits", timeout=5))["circuits"]) == 1 and "Delete it" in await b.eval("[...document.querySelectorAll('#cir-actions button')].find(b => b.classList.contains('armed')).textContent"))
+        await b.eval("[...document.querySelectorAll('#cir-actions button')].find(b => b.classList.contains('armed')).click()")
+        await p.settle(1.0)
+        check("and pressed again, deletes the circuit", json.load(urllib.request.urlopen(base + "/api/circuits", timeout=5))["circuits"] == [] and "No circuits yet" in await p.text("#cir-hint"), await p.text("#cir-hint"))
+        await p.shot("circuits")
+        await b.eval("document.getElementById('cir-back').click()")
+        await p.settle(0.4)
+        check("Back returns to the trip list", await b.eval("document.getElementById('circuits').hidden") is True and await b.eval("document.getElementById('placeholder').hidden") is False)
+        bad_circuits = [m for m in b.console[circuit_mark:] if m[0] == "error" and "favicon" not in m[1] and "Failed to load resource" not in m[1]]
+        check("no console errors from the circuits view", not bad_circuits and not b.errors, str(bad_circuits[:3]))
+
+        print("\n== tags")
+        tag_mark = len(b.console)
+
+        def tags_of(tid):
+            return json.load(urllib.request.urlopen(base + f"/api/triplog/{tid}", timeout=5))["tags"]
+
+        await b.goto(base + f"/trips#{trip_id}", wait=2.5)
+        chips = await b.eval("[...document.querySelectorAll('#tag-chips .tag-chip')].map(e => e.textContent + ':' + e.getAttribute('aria-pressed'))")
+        check("a finished trip offers the fixed set of tags, none switched on", chips == ["Commute:false", "Tour:false", "Track:false", "Off-road:false", "Test:false", "Event:false"], str(chips))
+        check("there is a box for a tag of your own", await b.eval("document.getElementById('tag-form').hidden") is False)
+        check("no tag filter is offered while no trip has a tag", await b.eval("document.getElementById('tag-filter-row').hidden") is True)
+        await b.eval("[...document.querySelectorAll('#tag-chips .tag-chip')].find(e => e.textContent === 'Track').click()")
+        await p.settle(1.0)
+        check("pressing a tag puts it on the trip, kept by the relay", tags_of(trip_id) == ["Track"], str(tags_of(trip_id)))
+        check("and the button shows it is on", await b.eval("[...document.querySelectorAll('#tag-chips .tag-chip')].find(e => e.textContent === 'Track').getAttribute('aria-pressed')") == "true")
+        check("the list shows it under the trip", await b.eval(f"[...document.querySelectorAll('.item[data-id=\"{trip_id}\"] .tag-mini')].map(e => e.textContent)") == ["Track"])
+        check("and a tag filter appears above the list with that tag", await b.eval("document.getElementById('tag-filter-row').hidden") is False and await b.eval("[...document.getElementById('tag-filter').options].map(o => o.value).join('|')") == "|Track")
+        await b.eval("(() => { const i = document.getElementById('tag-input'); i.value = \"Dad's <b>car</b>\"; document.getElementById('tag-form').requestSubmit(); })()")
+        await p.settle(1.0)
+        check("a tag typed in is added too, as plain text", tags_of(trip_id) == ["Track", "Dad's <b>car</b>"] and await b.eval("document.querySelectorAll('#tag-chips b, .tag-mini b').length") == 0, str(tags_of(trip_id)))
+        check("it is offered as a button from then on", "Dad's <b>car</b>:true" in await b.eval("[...document.querySelectorAll('#tag-chips .tag-chip')].map(e => e.textContent + ':' + e.getAttribute('aria-pressed'))"))
+        await b.eval("(() => { const i = document.getElementById('tag-input'); i.value = 'TRACK'; document.getElementById('tag-form').requestSubmit(); })()")
+        await p.settle(0.6)
+        check("typing a tag the trip already has changes nothing and says so", tags_of(trip_id) == ["Track", "Dad's <b>car</b>"] and "already has" in await p.text("#tag-note"), await p.text("#tag-note"))
+        await b.eval("(() => { const i = document.getElementById('tag-input'); i.value = 'commute'; document.getElementById('tag-form').requestSubmit(); })()")
+        await p.settle(1.0)
+        check("typing the name of a fixed tag in any case uses the fixed spelling", tags_of(trip_id)[-1] == "Commute", str(tags_of(trip_id)))
+        await b.eval("(() => { const s = document.getElementById('search'); s.value = 'dad'; s.dispatchEvent(new Event('input', {bubbles: true})); })()")
+        await p.settle(0.3)
+        check("a trip can be found by its tag in the search box", await b.eval("[...document.querySelectorAll('#list .item')].map(e => e.dataset.id)") == [trip_id])
+        await b.eval("(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input', {bubbles: true})); })()")
+        total = await b.eval("document.querySelectorAll('#list .item').length")
+        await b.eval("(() => { const s = document.getElementById('tag-filter'); s.value = 'Track'; s.dispatchEvent(new Event('change', {bubbles: true})); })()")
+        await p.settle(0.3)
+        check("choosing a tag in the filter narrows the list to the trips that have it", await b.eval("[...document.querySelectorAll('#list .item')].map(e => e.dataset.id)") == [trip_id] and f"1 of {total}" in await p.text("#count"), await p.text("#count"))
+        await b.eval("(() => { const s = document.getElementById('tag-filter'); s.value = ''; s.dispatchEvent(new Event('change', {bubbles: true})); })()")
+        await b.eval("document.getElementById('all').click()")
+        await p.settle(1.5)
+        check("the all-trips map has a Tag filter with the tags in use", await b.eval("document.getElementById('f-tag').parentElement.hidden") is False and await b.eval("[...document.getElementById('f-tag').options].map(o => o.value).includes('Track')"))
+        await b.eval("(() => { const s = document.getElementById('f-tag'); s.value = 'Track'; s.dispatchEvent(new Event('change', {bubbles: true})); })()")
+        await p.settle(0.5)
+        check("and choosing one shows only those trips", f"1 of {total}" in await p.text("#ov-sub"), await p.text("#ov-sub"))
+        await b.eval("document.getElementById('stats-btn').click()")
+        await p.settle(1.2)
+        await b.eval("(() => { const s = document.getElementById('sf-tag'); s.value = 'Track'; s.dispatchEvent(new Event('change', {bubbles: true})); })()")
+        await p.settle(0.6)
+        check("the Stats view filters by tag too, so its totals can be had for one kind of drive", await b.eval("document.getElementById('sf-tag').parentElement.hidden") is False and f"1 of {total}" in await p.text("#st-sub"), await p.text("#st-sub"))
+        await b.goto(base + f"/trips#{trip_id}", wait=2.0)
+        await b.eval("[...document.querySelectorAll('#tag-chips .tag-chip')].find(e => e.textContent === 'Track').click()")
+        await p.settle(0.8)
+        check("pressing an on tag takes it off", tags_of(trip_id) == ["Dad's <b>car</b>", "Commute"], str(tags_of(trip_id)))
+        for _ in range(7):
+            await b.eval(f"(() => {{ const i = document.getElementById('tag-input'); i.value = 'extra' + Math.random().toString(36).slice(2, 8); document.getElementById('tag-form').requestSubmit(); }})()")
+            await p.settle(0.5)
+        check("a trip can hold at most eight tags, and the page says so", len(tags_of(trip_id)) == 8 and "8 tags" in await p.text("#tag-note"), f"{len(tags_of(trip_id))}: {await p.text('#tag-note')}")
+        await p.shot("tags")
+        for _ in range(9):  # (each press redraws the row, so the next one is looked for afresh)
+            await b.eval("document.querySelector('#tag-chips .tag-chip.on')?.click()")
+            await p.settle(0.4)
+        check("every tag can be taken off again", tags_of(trip_id) == [] and await b.eval("document.getElementById('tag-filter-row').hidden") is True, str(tags_of(trip_id)))
+        bad_tags = [m for m in b.console[tag_mark:] if m[0] == "error" and "favicon" not in m[1] and "Failed to load resource" not in m[1]]
+        check("no console errors from the tags", not bad_tags and not b.errors, str(bad_tags[:3]))
+
+        print("\n== fuel price, cost and CSV")
+        price_mark = len(b.console)
+
+        def trip_json(tid):
+            return json.load(urllib.request.urlopen(base + f"/api/triplog/{tid}", timeout=5))
+
+        used = trip_json(trip_id)["stats"]["fuel"]["used"]
+        await b.goto(base + f"/trips#{trip_id}", wait=2.5)
+        check("a trip with no price has no cost tile", await b.eval("!document.querySelector('#tiles .tile[data-key=cost]')") is True)
+        check("its price box is offered, saying there is none", await b.eval("document.getElementById('price-box').hidden") is False and "none" in await p.text("#price-summary"), await p.text("#price-summary"))
+        await b.eval("document.getElementById('price-box').open = true")
+        await b.eval("(() => { document.getElementById('tp-liquid').value = '2.5'; document.getElementById('tp-currency').value = '$'; document.getElementById('tp-save').click(); })()")
+        await p.settle(1.2)
+        saved_price = trip_json(trip_id)["price"]
+        check("setting a trip's price keeps it in the trip", saved_price == {"liquid": 2.5, "electric": 0.0, "currency": "$"}, str(saved_price))
+        cost_text = await b.eval("document.querySelector('#tiles .tile[data-key=cost] .tile-value')?.textContent")
+        check("and the trip shows what it cost: the fuel used times the price", cost_text == f"${used * 2.5:.2f}", f"{cost_text} for {used} L")
+        check("the summary names the price", "$2.50 per litre" in await p.text("#price-summary"), await p.text("#price-summary"))
+        await b.goto(base + "/trips#stats", wait=2.0)
+        stat = await b.eval("(() => { const t = document.querySelector('#st-tiles .tile[data-key=cost]'); return t ? [t.querySelector('.tile-value').textContent, t.querySelector('.tile-sub').textContent] : null; })()")
+        check("the Stats view adds the costs up, and says how many trips are priced", stat is not None and stat[0] == cost_text and "1 of" in stat[1] and "priced" in stat[1], str(stat))
+
+        # -- the CSV of the trips shown
+        # (a real download is not held to the page's connect-src policy, but reading the blob back with fetch would be: so the test keeps the Blob itself)
+        await b.eval("window.__dl = null; window.__blob = null; const makeUrl = URL.createObjectURL.bind(URL); URL.createObjectURL = (blob) => { window.__blob = blob; return makeUrl(blob); }; HTMLAnchorElement.prototype.click = function () { window.__dl = { name: this.download, href: this.href }; };")
+        await b.eval("document.getElementById('st-csv').click()")
+        dl = await b.eval("window.__dl")
+        check("Download as CSV offers a dated file", dl is not None and re.fullmatch(r"thrashdash-trips-\d{4}-\d{2}-\d{2}\.csv", dl["name"] or "") is not None, str(dl))
+        check("the file is made from the trips shown, as text/csv", await b.eval("window.__blob.type") == "text/csv;charset=utf-8" and (await b.eval("window.__dl.href")).startswith("blob:"))
+        raw = await b.eval("window.__blob.arrayBuffer().then(b => [...new Uint8Array(b)])")
+        text = bytes(raw).decode("utf-8")
+        check("it is UTF-8 with a mark, as Excel needs", bytes(raw[:3]) == b"\xef\xbb\xbf")
+        import csv as _csv, io as _io
+        rows = list(_csv.reader(_io.StringIO(text[1:])))
+        finished = [t for t in json.load(urllib.request.urlopen(base + "/api/triplog", timeout=5))["trips"] if t.get("stats") and not t.get("recording")]
+        check("it has a header and a row for each finished trip", len(rows) - 1 == len(finished) and rows[0][0] == "id" and "cost" in rows[0], f"{len(rows) - 1} rows for {len(finished)} trips")
+        row = next(r for r in rows[1:] if r[0] == trip_id)
+        costs = dict(zip(rows[0], row))
+        check("the priced trip's row has its cost, price and currency", (costs["cost"], costs["price_per_unit"], costs["currency"], costs["energy_unit"]) == (f"{used * 2.5:.2f}", "2.5", "$", "L"), str(costs))
+        check("a trip with no price has an empty cost", any(dict(zip(rows[0], r))["cost"] == "" for r in rows[1:] if r[0] != trip_id))
+
+        # -- the per-trip CSV
+        await b.goto(base + f"/trips#{trip_id}", wait=2.0)
+        check("a trip has a CSV link", (await b.eval("document.getElementById('export-csv').getAttribute('href')")) == f"/api/triplog/{trip_id}/csv")
+        head = await b.eval(f"fetch('/api/triplog/{trip_id}/csv').then(async r => [r.status, r.headers.get('content-type'), [...new Uint8Array(await r.arrayBuffer()).slice(0, 12)]])")
+        check("it is a CSV with the byte order mark", head[0] == 200 and head[1].startswith("text/csv") and bytes(head[2][:3]) == b"\xef\xbb\xbf" and bytes(head[2][3:]).startswith(b"t_s,"), str(head))
+
+        # -- taking a price away, and the setting
+        await b.eval("document.getElementById('price-box').open = true; document.getElementById('tp-remove').click()")
+        await p.settle(1.0)
+        check("a trip's price can be taken away again, and its cost goes", trip_json(trip_id)["price"] is None and await b.eval("!document.querySelector('#tiles .tile[data-key=cost]')") is True)
+        await b.eval("document.getElementById('popups').open = true")
+        check("the fuel price setting is offered on this computer", await b.eval("document.getElementById('price-settings').hidden") is False)
+        await b.eval("(() => { document.getElementById('price-liquid').value = '3.1'; document.getElementById('price-electric').value = '0.25'; document.getElementById('price-currency').value = 'EUR'; document.getElementById('price-save').click(); })()")
+        await p.settle(1.0)
+        saved_setting = json.load(urllib.request.urlopen(base + "/api/settings", timeout=5))["fuelPrice"]
+        check("saving it keeps it for the relay", saved_setting == {"liquid": 3.1, "electric": 0.25, "currency": "EUR"} and "Saved" in await p.text("#price-note"), str(saved_setting))
+        check("the earlier trip did not take the new price", trip_json(trip_id)["price"] is None)
+        await b.eval("(() => { document.getElementById('price-liquid').value = '-1'; document.getElementById('price-save').click(); })()")
+        await p.settle(0.4)
+        check("a price that is not a price is refused, and says so", "number" in await p.text("#price-note") and json.load(urllib.request.urlopen(base + "/api/settings", timeout=5))["fuelPrice"]["liquid"] == 3.1, await p.text("#price-note"))
+
+        # -- a trip that starts now is given the price of now (the setting, copied in as the trip begins)
+        gamep = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        try:
+            for i in range(45):
+                gamep.sendto(json.dumps({"v": 1, "type": "geo", "rt": 3000.0 + i, "ts": 1795300000 + i, "lat": -41.6 + i * 0.00015, "lon": 174.9, "alt": 5.0, "spd": 16.0, "hdg": 0.0, "ready": True, "veh": 1, "model": "etkc"}).encode(), ("127.0.0.1", udp))
+                await asyncio.sleep(0.01)
+            await asyncio.sleep(0.5)
+            newest = json.load(urllib.request.urlopen(base + "/api/triplog", timeout=5))["trips"][0]
+            check("a trip that starts after the price was set is given it", newest["recording"] is True and newest["price"] == {"liquid": 3.1, "electric": 0.25, "currency": "EUR"}, str(newest)[:200])
+            gamep.sendto(json.dumps({"v": 1, "type": "geoevent", "name": "levelEnd", "rt": 3100.0, "ts": 1795300100}).encode(), ("127.0.0.1", udp))
+            await p.settle(1.0)
+            ended = trip_json(newest["id"])
+            check("and keeps it when it ends", ended["price"] == {"liquid": 3.1, "electric": 0.25, "currency": "EUR"} and ended["header"].get("price") is not None)
+            json.load(urllib.request.urlopen(urllib.request.Request(base + "/api/settings", method="PUT", data=json.dumps({"fuelPrice": {"liquid": 99, "electric": 0, "currency": "X"}}).encode(), headers={"X-ThrashDash": "1", "Content-Type": "application/json"}), timeout=5))
+            check("a later change of the price leaves it alone", trip_json(newest["id"])["price"]["liquid"] == 3.1)
+        finally:
+            gamep.close()
+        json.load(urllib.request.urlopen(urllib.request.Request(base + "/api/settings", method="PUT", data=json.dumps({"fuelPrice": {"liquid": 0, "electric": 0, "currency": ""}}).encode(), headers={"X-ThrashDash": "1", "Content-Type": "application/json"}), timeout=5))
+        bad_price = [m for m in b.console[price_mark:] if m[0] == "error" and "favicon" not in m[1] and "Failed to load resource" not in m[1]]
+        check("no console errors from prices and CSV", not bad_price and not b.errors, str(bad_price[:3]))
+
+        print("\n== planning a GPS route")
+        route_mark = len(b.console)
+        CAR = (-41.2880, 174.7770)
+
+        class FakeGame:
+            """Stands in for the game's extension: tells the relay where the car is (so it knows where to send commands), takes route commands,
+            answers them, and then reports the planned route (its line and its progress) the way BeamNG.Earth would."""
+
+            def __init__(self):
+                self.sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+                self.sock.bind(("127.0.0.1", 0))
+                self.sock.setblocking(False)
+                self.received, self.stops, self.version, self.answer, self.why = [], None, 0, True, "too far apart"
+                self.rt, self.stop = 5000.0, False
+                self.off, self.planning, self.frames = 0.0, False, 0
+                self.task = None
+
+            def send(self, packet):
+                self.sock.sendto(json.dumps({"v": 1, **packet}).encode(), ("127.0.0.1", udp))
+
+            def report_route(self):
+                pts = [list(CAR)] + [[s["lat"], s["lon"]] for s in self.stops]
+                line = []
+                for a, c in zip(pts, pts[1:]):
+                    line += [[a[0] + (c[0] - a[0]) * k / 4, a[1] + (c[1] - a[1]) * k / 4] for k in range(4)]
+                line.append(pts[-1])
+                last = self.stops[-1]
+                self.send({"type": "georoutepath", "version": self.version, "points": line, "dest": last, "waypoints": self.stops[:-1]})
+
+            async def run(self):
+                tick = 0
+                while not self.stop:
+                    self.rt += 0.1
+                    self.send({"type": "geolive", "rt": self.rt, "st": self.rt, "lat": CAR[0], "lon": CAR[1], "hdg": 0.0, "spd": 0.0})
+                    tick += 1
+                    self.send({"type": "frame", "n": tick, "vehicle": "etkc", "electrics": {"rpm": 1000, "wheelspeed": 10.0}})
+                    if tick % 30 == 0 and self.stops:
+                        self.report_route()  # (the game sends the line again every twenty seconds: faster here)
+                    if tick % 5 == 0:
+                        gps = {"remaining": 2400.0, "eta": 300.0, "off": self.off, "planning": self.planning, "name": (self.stops[-1].get("name") or "Destination") if self.stops else None, "routeVersion": self.version} if self.stops else None
+                        self.send({"type": "georoute", "rt": self.rt, **({"gps": gps} if gps else {})})
+                    try:
+                        while True:
+                            msg = json.loads(self.sock.recv(65535))
+                            self.received.append(msg)
+                            if msg.get("action") == "clear":
+                                self.stops = None
+                                self.send({"type": "georouteack", "ok": True})
+                            elif msg.get("action") == "set" and not self.answer:
+                                self.send({"type": "georouteack", "ok": False, "why": self.why})
+                            elif msg.get("action") == "set":
+                                self.version += 1
+                                self.stops = msg["stops"]
+                                self.send({"type": "georouteack", "ok": True})
+                                self.report_route()
+                    except BlockingIOError:
+                        pass
+                    await asyncio.sleep(0.1)
+
+        fake = FakeGame()
+        fake.task = asyncio.ensure_future(fake.run())
+        try:
+            await b.resize(1400, 1100)
+            await b.goto(base + "/trips?debug=1#route", wait=3.0)
+            check("the Route view opens, with the Route button pressed and the others stepped aside", await b.eval("document.getElementById('route-view').hidden") is False and await b.eval("document.getElementById('route-btn').getAttribute('aria-pressed')") == "true" and await b.eval("['detail','overview','stats','compare-view','circuits'].every(i => document.getElementById(i).hidden)") is True)
+            check("it says no route is set in the game", "No route is set" in await p.text("#rv-status"), await p.text("#rv-status"))
+            check("this computer is offered Send and Clear, and Send waits for a stop", await b.eval("document.getElementById('rv-edit').hidden") is False and await b.eval("document.getElementById('rv-send').disabled") is True)
+            check("the map is on the car (and not on the whole world)", (await b.eval("__routeDebug.center()"))["lat"] < -41.0)
+            await b.eval("document.getElementById('rvmap').scrollIntoView({block: 'center'})")
+
+            async def click_at(dlat, dlon):
+                pt = await b.eval(f"__routeDebug.screenPoint({CAR[0] + dlat}, {CAR[1] + dlon})")
+                await b.click(pt["x"], pt["y"])
+                await p.settle(0.3)
+
+            await click_at(0.003, 0.004)
+            stops = await b.eval("__routeDebug.stops()")
+            check("a click on the map adds a stop where it was clicked", len(stops) == 1 and abs(stops[0]["lat"] - (CAR[0] + 0.003)) < 0.0005 and abs(stops[0]["lon"] - (CAR[1] + 0.004)) < 0.0007, str(stops))
+            check("it is listed as the destination, and the summary counts it", await p.text(".rv-stop-name") == "Destination" and await p.text("#rv-summary") == "1 stop", await p.text("#rv-summary"))
+            check("Send is now available", await b.eval("document.getElementById('rv-send').disabled") is False)
+            await click_at(-0.003, 0.002)
+            names = await b.eval("[...document.querySelectorAll('.rv-stop-name')].map(e => e.textContent)")
+            check("a second stop makes the first a stop on the way", names == ["Stop 1", "Destination"] and "straight line" in await p.text("#rv-summary"), str(names))
+            await b.eval("document.querySelectorAll('.rv-stop')[1].querySelector('button[aria-label$=\\\"earlier\\\"]').click()")
+            await p.settle(0.3)
+            order = await b.eval("__routeDebug.stops()")
+            check("a stop can be moved earlier in the route", order[0]["lat"] < CAR[0] and order[1]["lat"] > CAR[0], str(order))
+            # -- saving a stop as a destination
+            await b.eval("document.querySelectorAll('.rv-stop')[0].querySelector('button[aria-label$=\\\"save as a destination\\\"]').click()")
+            await p.settle(0.3)
+            await b.eval("(() => { const i = document.getElementById('rv-save-name'); i.value = 'Cafe <b>x</b>'; i.form.requestSubmit(); })()")
+            await p.settle(1.0)
+            saved = json.load(urllib.request.urlopen(base + "/api/destinations", timeout=5))["destinations"]
+            check("a stop can be saved under a name, kept by the relay", len(saved) == 1 and saved[0]["name"] == "Cafe <b>x</b>" and abs(saved[0]["lat"] - order[0]["lat"]) < 1e-5, str(saved))
+            check("and it is offered in the saved list as plain text", "Cafe <b>x</b>" in await p.text(".rv-dest-add") and await b.eval("document.querySelectorAll('#rv-saved b').length") == 0)
+            await b.eval("document.querySelector('.rv-dest-add').click()")
+            await p.settle(0.3)
+            check("pressing a saved destination adds it as a stop, with its name", (await b.eval("__routeDebug.stops()"))[-1].get("name") == "Cafe <b>x</b>")
+            # -- a place from an earlier trip
+            options = await b.eval("[...document.querySelectorAll('#rv-places option')].map(o => o.textContent)")
+            check("places from the earlier trips are offered", len(options) >= 2 and options[0].startswith("Choose"), str(options))
+            await b.eval("(() => { const s = document.getElementById('rv-places'); s.value = '0'; })()")
+            await b.eval("document.getElementById('rv-places-add').click()")
+            await p.settle(0.3)
+            check("adding one makes it a stop, named as the trip was", len(await b.eval("__routeDebug.stops()")) == 4 and bool((await b.eval("__routeDebug.stops()"))[-1].get("name")))
+            await b.eval("document.querySelectorAll('.rv-stop')[3].querySelector('button[aria-label^=\\\"Remove\\\"]').click()")
+            await p.settle(0.3)
+            check("a stop can be taken away", len(await b.eval("__routeDebug.stops()")) == 3)
+            # -- the game refuses, then takes it
+            fake.answer = False
+            await b.eval("document.getElementById('rv-send').click()")
+            await p.settle(1.2)
+            check("a route the game refuses says why, and nothing is drawn", "too far apart" in await p.text("#rv-note") and await b.eval("__routeDebug.planDrawn()") == "", await p.text("#rv-note"))
+            fake.answer = True
+            await b.eval("document.getElementById('rv-send').click()")
+            await p.settle(3.5)
+            sent = [m for m in fake.received if m.get("action") == "set"][-1]
+            check("Send gives the game every stop, in order, as plain places", len(sent["stops"]) == 3 and sent["stops"][0]["lat"] < CAR[0] and sent["stops"][2].get("name") == "Cafe <b>x</b>", str(sent)[:200])
+            check("the planned route comes back and is drawn", await b.eval("__routeDebug.planDrawn()") != "", await b.eval("__routeDebug.planDrawn()"))
+            check("the status says where to, how far and how long", "Route set" in await p.text("#rv-status") and "2.4 km" in await p.text("#rv-status") and "5 min" in await p.text("#rv-status"), await p.text("#rv-status"))
+            await p.shot("route-view")
+            sent_line = json.load(urllib.request.urlopen(base + "/api/route", timeout=5))["points"]
+            drawn = await b.eval("__routeDebug.planPoints()")
+            check("the planned route is drawn through exactly the points Earth gave, none added or left out", drawn == len(sent_line) == len(fake.stops) * 4 + 1, f"{drawn} drawn, {len(sent_line)} given")
+
+            # -- the route on the live map of a trip being driven
+            for i in range(45):
+                fake.send({"type": "geo", "rt": 7000.0 + i, "ts": 1795400000 + i, "lat": CAR[0] - 0.01 + i * 0.00015, "lon": CAR[1], "alt": 5.0, "spd": 16.0, "hdg": 0.0, "ready": True, "veh": 1, "model": "etkc"})
+                await asyncio.sleep(0.02)
+            await b.goto(base + "/trips?debug=1", wait=3.0)
+            await p.settle(4.0)
+            live_info = await b.eval("(() => { const c = document.getElementById('route-chip'); return [c.hidden, c.textContent, __tripsDebug().plan, document.getElementById('detail').hidden]; })()")
+            check("on the map of the trip being driven the route shows, with where to and how far", live_info[3] is False and live_info[0] is False and "2.4 km" in live_info[1] and live_info[2] != "", str(live_info))
+            await p.shot("route-on-live-map")
+            fake.send({"type": "geoevent", "name": "levelEnd", "rt": 7100.0, "ts": 1795400100})
+            await p.settle(2.0)
+            # -- leaving the route: the panel's warning, the alert (off until asked for), and Earth planning again
+            def relay_api(method, path, body=None):
+                req = urllib.request.Request(base + path, method=method, data=None if body is None else json.dumps(body).encode(), headers={"X-ThrashDash": "1", "Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    return json.load(r)
+
+            off_id = relay_api("POST", "/api/layouts", {"format": 1, "name": "Off route", "width": 400, "height": 400, "widgets": [{"id": "rt", "type": "route", "x": 20, "y": 20, "w": 340, "h": 340}]})["id"]
+            look = """(() => ({ dest: document.querySelector('.rt-dest')?.textContent, plan: document.querySelector('.rt-plan')?.hidden === false ? document.querySelector('.rt-plan').textContent : '',
+                     off: document.querySelector('.rt-off')?.hidden === false, banner: [...document.querySelectorAll('#alerts .al-item')].map(e => e.textContent) }))()"""
+
+            async def until(test, seconds=8.0):
+                seen = None
+                for _ in range(int(seconds / 0.2)):
+                    seen = await b.eval(look)
+                    if test(seen):
+                        break
+                    await asyncio.sleep(0.2)
+                return seen
+
+            await b.goto(base + f"/?d={off_id}", wait=2.0)
+            fake.off = 80.0
+            seen = await until(lambda s: s["off"])
+            await asyncio.sleep(4.0)
+            seen = await b.eval(look)
+            check("more than 50 m away the panel warns, and no alert shows while it is switched off", seen["off"] is True and not any("Off the route" in x for x in seen["banner"]), str(seen))
+            fake.off = 0.0
+            await b.key("e")
+            await p.settle(0.9)
+            check("the editor offers the off-route alert, unticked", await b.eval("document.querySelector('.al-opt input[data-alert=offRoute]')?.checked") is False)
+            await b.eval("document.querySelector('.al-opt input[data-alert=offRoute]').click()")
+            await p.settle(0.6)
+            saved = relay_api("GET", "/api/settings")["alerts"]
+            check("ticking it is saved as switched on, leaving the others alone", saved.get("on") == ["offRoute"] and saved.get("off") == [], str(saved))
+            await p.click_text(".ed-bar .btn", "Done")
+            await p.settle(0.5)
+            fake.off = 80.0
+            await asyncio.sleep(1.2)
+            early = await b.eval(look)
+            late = await until(lambda s: any("Off the route" in x for x in s["banner"]))
+            check("the alert waits a few seconds, then shows", not any("Off the route" in x for x in early["banner"]) and any("Off the route" in x for x in late["banner"]), f"{early} then {late}")
+            fake.off, fake.planning = 130.0, True
+            seen = await until(lambda s: s["plan"])
+            check("while Earth plans again the panel says Re-routing, in place of its warning", seen["plan"] == "Re-routing\u2026" and seen["off"] is False, str(seen))
+            await p.shot("route-rerouting")
+            fake.off, fake.planning = 0.0, False
+            fake.version += 1
+            fake.report_route()
+            await asyncio.sleep(0.8)
+            held = await b.eval(look)
+            check("it stays a moment after the new route arrives, so it can be read", held["plan"] == "Re-routing\u2026", str(held))
+            seen = await until(lambda s: not s["plan"] and not s["banner"])
+            check("then it goes, and the alert with it", seen["plan"] == "" and seen["off"] is False and not any("Off the route" in x for x in seen["banner"]), str(seen))
+            relay_api("PUT", "/api/settings", {"alerts": {"on": []}})
+            relay_api("DELETE", f"/api/layouts/{off_id}")
+            # -- clearing it
+            await b.goto(base + "/trips?debug=1#route", wait=2.5)
+            await b.eval("document.getElementById('rv-clear').click()")
+            await p.settle(2.5)
+            check("Clear tells the game, and the route goes from the status and the map", any(m.get("action") == "clear" for m in fake.received) and "No route is set" in await p.text("#rv-status") and await b.eval("__routeDebug.planDrawn()") == "", await p.text("#rv-status"))
+            await b.eval("document.getElementById('rv-places').value = '0'; document.getElementById('rv-places-add').click()")
+            await p.settle(0.3)
+            check("(the stops belong to the page: a fresh one starts empty, and a place can be added to it)", len(await b.eval("__routeDebug.stops()")) == 1)
+            await b.eval("document.getElementById('rv-clear-stops').click()")
+            await p.settle(0.3)
+            check("Clear the stops empties the list", await b.eval("__routeDebug.stops()") == [] and await b.eval("document.getElementById('rv-send').disabled") is True)
+            await b.eval("document.querySelector('.rv-dest .btn').click()")
+            await p.settle(0.2)
+            await b.eval("document.querySelector('.rv-dest .btn.armed').click()")
+            await p.settle(0.8)
+            check("a saved destination can be deleted (it asks twice)", json.load(urllib.request.urlopen(base + "/api/destinations", timeout=5))["destinations"] == [])
+            await b.eval("document.getElementById('rv-back').click()")
+            await p.settle(0.4)
+            check("Back returns to the trip list", await b.eval("document.getElementById('route-view').hidden") is True and await b.eval("document.getElementById('placeholder').hidden") is False)
+        finally:
+            fake.stop = True
+            await asyncio.sleep(0.2)
+            fake.sock.close()
+        bad_route = [m for m in b.console[route_mark:] if m[0] == "error" and "favicon" not in m[1] and "Failed to load resource" not in m[1]]
+        check("no console errors from route planning", not bad_route and not b.errors, str(bad_route[:3]))
+        b.console[:] = [m for m in b.console if not ("409" in m[1] and "/api/route" in m[1])]  # (the game's refusal is answered with a 409 on purpose: the browser logs it)
 
         bad = [m for m in b.console[mark:] if m[0] == "error" and "favicon" not in m[1] and "Failed to load resource" not in m[1]]
         check("the Trips page raised no console errors (tile loads aside)", not bad, str(bad[:3]))

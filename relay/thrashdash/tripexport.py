@@ -1,4 +1,4 @@
-"""A trip as a GPX or KML file, to open in other programs.
+"""A trip as a GPX, KML or CSV file, to open in other programs.
 
 GPX is what GPS tools and most mapping programs read (a track of timed points, with the speed in the Garmin extension many of
 them understand). KML is what Google Earth reads (no key or account needed): the route as a line on the ground, and a timed
@@ -10,6 +10,8 @@ escaped, and anything XML 1.0 cannot hold is removed, so a strange name can neve
 The times are real: the trip's start (UTC) plus each point's seconds into the trip. The heights are BeamNG.Earth's, and KML
 is told to ignore them and lay the path on the ground, so a height that is off cannot bury the route in the terrain.
 """
+import csv
+import io
 import re
 from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape
@@ -130,6 +132,69 @@ def to_kml(data, stats):
         out.append("</gx:Track></Placemark></Folder>")
     out += ["</Document>", "</kml>"]
     return "\n".join(line for line in out if line) + "\n"
+
+
+# ---- CSV: one row per recorded point, for a spreadsheet ---------------------------------------------------------------------------------
+
+# A reading from the game (the posted limit, the street) holds until the next one; one older than this is no longer where the car is.
+_INFO_HOLD_S = 15.0
+# A cell a spreadsheet would take for a formula starts with one of these. The street names come from a map of the world: nothing in
+# them may run as anything in someone's spreadsheet, so such a cell is made text with a leading apostrophe.
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_text(value):
+    """A text cell: control characters out, and not something a spreadsheet would run as a formula."""
+    text = "".join(c if c.isprintable() else " " for c in str(value))
+    return "'" + text if text.startswith(_FORMULA_START) else text
+
+
+def _cell(value, places=None):
+    """A cell: empty for nothing (or a number that is not a number), true/false, a number to `places` decimals, or text."""
+    if value is None or value == "":
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if _num(value):
+        if value != value or value in (float("inf"), float("-inf")):
+            return ""
+        return f"{value:.{places}f}" if places is not None else str(value)
+    return csv_text(value)
+
+
+def csv_bytes_text(rows):
+    """Rows of cells as CSV text: UTF-8 with a byte order mark (Excel on Windows only reads names like Taupo or Whanganui with their
+    macrons right if the file says it is UTF-8), CRLF line ends (as RFC 4180 has it), cells quoted only where they need it."""
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\r\n")
+    writer.writerows(rows)
+    return "\ufeff" + out.getvalue()
+
+
+def to_csv(data, stats=None):
+    """The trip's points as CSV, one row each (about once a second). Everything is in SI units with the unit in the column's name, so
+    a spreadsheet does not depend on the units the person chose on the Trips page. A value the game did not give is an empty cell."""
+    header = data.get("header") or {}
+    energy = header.get("energy")
+    fuel_col = {"liquid": "fuel_volume_l", "electric": "fuel_volume_kwh"}.get(energy, "fuel_volume")
+    columns = ["t_s", "time_utc", "lat", "lon", "altitude_m", "speed_ms", "heading_deg", "distance_m", "speed_limit_ms", "limit_is_posted",
+               "street", "place", "fuel_fraction", fuel_col, "body_damage_pct", "peak_g"]
+    start = _start(data)
+    info = sorted((i for i in data.get("info", []) if isinstance(i, dict) and _num(i.get("t"))), key=lambda i: i["t"])
+    rows = [columns]
+    at = -1  # the latest reading at or before the point
+    for p in _points(data):
+        while at + 1 < len(info) and info[at + 1]["t"] <= p["t"]:
+            at += 1
+        reading = info[at] if at >= 0 and p["t"] - info[at]["t"] <= _INFO_HOLD_S else {}
+        limit = reading.get("lim") if isinstance(reading.get("lim"), dict) else {}
+        place = reading.get("place") if isinstance(reading.get("place"), dict) else {}
+        rows.append([
+            _cell(p["t"], 2), _iso(start, p["t"]), _cell(p["la"], 7), _cell(p["lo"], 7), _cell(p.get("al"), 1), _cell(p.get("s"), 2),
+            _cell(p.get("h"), 1), _cell(p.get("d"), 1), _cell(limit.get("ms"), 2), _cell(limit.get("m") is True if _num(limit.get("ms")) else None),
+            _cell(place.get("street")), _cell(place.get("place")), _cell(p.get("f"), 4), _cell(p.get("fv"), 3), _cell(p.get("dm"), 2), _cell(p.get("g"), 2),
+        ])
+    return csv_bytes_text(rows)
 
 
 def file_name(data, stats, extension):

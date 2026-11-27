@@ -154,7 +154,9 @@ class SettingsStore:
                 # where BeamNG.Earth is kept (a folder: the newest version in it is started; or a file); empty: ThrashDash does not start it
                 "earthPath": "",
                 # what counts as an impact on the Trips page: body damage of at least `damage` percent, or a force of at least `g` (0: ignore force)
-                "impactRule": {"damage": 1.0, "g": 4.0}}
+                "impactRule": {"damage": 1.0, "g": 4.0},
+                # the price of fuel (per litre) and electricity (per kWh), 0 for none, and its currency symbol: copied into each trip as it starts
+                "fuelPrice": {"liquid": 0.0, "electric": 0.0, "currency": ""}}
 
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -163,7 +165,7 @@ class SettingsStore:
     def _fresh(cls):
         d = cls.DEFAULTS
         return {"units": dict(d["units"]), "defaultLayout": d["defaultLayout"], "skins": {}, "vehicleDashboards": {}, "autoSwitch": d["autoSwitch"], "lan": d["lan"], "alerts": {"enabled": True, "off": []}, "tripNotices": dict(d["tripNotices"]), "tripIdleEndMin": d["tripIdleEndMin"],
-                "restoreWindows": d["restoreWindows"], "exactWindowPlacement": d["exactWindowPlacement"], "closeWindowsOnExit": d["closeWindowsOnExit"], "earthPath": d["earthPath"], "impactRule": dict(d["impactRule"])}
+                "restoreWindows": d["restoreWindows"], "exactWindowPlacement": d["exactWindowPlacement"], "closeWindowsOnExit": d["closeWindowsOnExit"], "earthPath": d["earthPath"], "impactRule": dict(d["impactRule"]), "fuelPrice": dict(d["fuelPrice"])}
 
     def get(self):
         merged = self._fresh()
@@ -191,6 +193,7 @@ class SettingsStore:
         if "earthPath" in stored:
             merged["earthPath"] = stored["earthPath"]
         merged["impactRule"].update(stored.get("impactRule", {}))
+        merged["fuelPrice"].update(stored.get("fuelPrice", {}))
         return merged
 
     def update(self, raw):
@@ -225,6 +228,7 @@ class SettingsStore:
         if "earthPath" in patch:
             current["earthPath"] = patch["earthPath"]
         current["impactRule"].update(patch.get("impactRule", {}))
+        current["fuelPrice"].update(patch.get("fuelPrice", {}))
         if len(current["skins"]) > MAX_SKIN_ENTRIES:
             raise ValidationError(f"too many dashboards with a skin (limit {MAX_SKIN_ENTRIES})")
         if len(current["vehicleDashboards"]) > MAX_VEHICLE_RULES:

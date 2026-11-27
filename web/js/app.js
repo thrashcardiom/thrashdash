@@ -1,3 +1,5 @@
+import { createAlertSound } from "./alertSound.js";
+import { applyTheme } from "./theme.js";
 import { alertSettings, createAlertBanner, createAlertTracker } from "./alerts.js";
 import { api } from "./api.js";
 import { buildDashboard, fitCanvas } from "./dashboard.js";
@@ -102,6 +104,7 @@ const editing = () => document.body.classList.contains("editing");
 
 function fit(layout = app.layout) {
   app.layout = layout;
+  applyTheme(canvas, document.body, layout.theme); // (the colours saved with the dashboard; none leaves the stylesheet's)
   // While editing, the whole canvas is always shown so it can be edited; the scale setting applies in normal view.
   app.scale = fitCanvas(canvas, layout, { insetRight: app.insetRight, setting: loadZoomOverride() ?? layout, fitAll: editing() });
 }
@@ -237,6 +240,9 @@ const host = {
   skinChoices: SKIN_CHOICES.map((id) => ({ id, label: SKIN_LABELS[id] })),
   getInsetRight: () => app.insetRight,
   getAlerts: () => app.alerts,
+  get alertSound() {
+    return alertSound; // this window's chime: {settings, set(), test(), blocked} (declared further down, so read when asked for)
+  },
   /** Persist which alerts are on ({enabled, off}) and apply it at once. */
   async saveAlerts(patch) {
     const settings = await api.saveSettings({ alerts: patch });
@@ -565,6 +571,9 @@ function connect() {
 // ---- alerts: the banner over the dashboard ----------------------------------------------
 
 const alertTracker = createAlertTracker();
+// The optional chime for a new alert: per window, off until switched on (see alertSound.js).
+const alertSound = createAlertSound({ storage: localStorage, search: location.search });
+alertSound.unlockOnGesture();
 const alertBanner = createAlertBanner(document.getElementById("alerts"));
 let lastAlertCheck = 0;
 
@@ -572,7 +581,9 @@ let lastAlertCheck = 0;
 function updateAlerts(now) {
   if (now - lastAlertCheck < 200) return;
   lastAlertCheck = now;
-  alertBanner.show(alertTracker.update(app.status.connected ? app.values : null, app.alerts, now));
+  const showing = alertTracker.update(app.status.connected ? app.values : null, app.alerts, now, app.prefs);
+  alertBanner.show(showing);
+  alertSound.update(showing);
 }
 
 // Another window (or the editor) may have changed which alerts are on: look again when this window is used.

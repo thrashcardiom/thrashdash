@@ -27,9 +27,36 @@ SLOW_SECTIONS = ("tire", "damage", "state", "energy")
 # weather there, and events such as a teleport. They go to the trip log, not to the dashboard's channels.
 GEO_TYPES = ("geo", "geoinfo", "geoevent", "geopoi")
 
+# What the dashboards may know about the world (the posted speed limit, the route's progress) is published as channels too:
+#   geo.limit (m/s) and geo.limitPosted   from each `geoinfo` (every second), only while a limit is known
+#   geo.route.active, .remaining (m), .eta (s), .off (m from the route), .name   from each `georoute` (every second)
+#   geo.route.planning and .replanning    true while Earth is making a plan (replanning: a new one for a route it already had)
+#   lap.*                                 from the lap timer (laps.py), with every live position (ten a second)
+# They are the game's latest word and nothing more: a reading older than this is dropped rather than shown (the game may have
+# been paused, or closed), so a stale limit can never raise an alert.
+GEO_TTL_S = 4.0
+LIMIT_MAX_MS = 100.0  # 360 km/h: anything above is not a limit
+ROUTE_MAX_M = 2.0e7  # half way round the world
+ROUTE_MAX_S = 1.0e7
+ROUTE_NAME_MAX = 60
+PLAN_SHOW_S = 3.0  # a plan is shown for at least this long: Earth is often done within a second, too quick to read
+# The route's steps (turn here, take exit 2...) come once per route, in a `geosteps` packet; with the car's progress along the route
+# (its length minus what remains) they give the next maneuver: geo.route.next.distance (m) and .type, .modifier, .street, .exit; and the one
+# after it: geo.route.then.gap (m after the next one) and .type, .modifier, .street, .exit.
+MAX_STEPS = 200
+MAX_PATH_POINTS = 1500  # the route's line (trips.lua sends no more)
+MAX_STOPS = 12
+STEP_TEXT_MAX = 60
+STEP_PASSED_M = 15.0  # a maneuver stays "next" until the car is this far past it, so it does not vanish the moment it is reached
+MAX_EXIT = 30
+
 # A source counts as "connected" if a frame arrived within this many seconds. The game sends 30/s,
 # so 2 s of silence reliably means paused-in-menu, car unseated, or game closed.
 STALE_AFTER_S = 2.0
+
+
+def _finite(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _type_name(value):
@@ -69,8 +96,9 @@ def flatten(node, prefix="", out=None, depth=0):
 
 
 class Hub:
-    def __init__(self, simulated=False, trip_path=None, triplog=None):
+    def __init__(self, simulated=False, trip_path=None, triplog=None, lap_timer=None):
         self.simulated = simulated
+        self.lap_timer = lap_timer  # laps and sectors from the live position (laps.LapTimer), or None
         self.triplog = triplog  # the BeamNG.Earth trip log (triplog.TripLog), or None when this run keeps none
         self.trips = TripComputer(trip_path)  # trip meters A and B (kept across restarts when trip_path is given)
         self._trip = {}  # their current channels (trip.A.distance ...)
@@ -85,6 +113,14 @@ class Hub:
         self.stats = Counter()
         self.live = deque(maxlen=128)  # the game's live positions (geolive), newest last, for the Trips page's live map
         self.live_seq = 0
+        self._geo_limit = ({}, None)  # (channels, time.monotonic() it arrived): the speed limit here
+        self._geo_route = ({}, None)  # the same for the route's progress
+        self._plan_version = None  # (the route version in the latest progress packet and when it came), to notice a new plan of the same route
+        self._plan_shown = None  # (replanning: bool, until) while a plan being made, or just made, is still to be shown
+        self._route_raw = None  # the latest progress packet's numbers: {"version", "remaining"}, to work out the next maneuver from
+        self._route_steps = None  # {"version", "dist", "steps"} from the latest `geosteps`
+        self._route_path = None  # {"version", "points", "dest", "waypoints"} from the latest `georoutepath`: the planned route's line, for the maps
+        self.route_ack = {"seq": 0, "ok": None, "why": None}  # the game's answer to the latest command to set or clear the route
         self._g_peak = 0.0  # the strongest force on the car (m/s^2) seen since the last position sample
         self._frame_json = (None, "")  # (seq, serialized) cache so N browsers share one json.dumps
 
@@ -112,7 +148,19 @@ class Hub:
         elif kind == "slow":
             self._accept_slow(vehicle, packet)
         elif kind in GEO_TYPES:
+            if kind == "geoinfo":
+                self._accept_limit(packet)
+            elif kind == "geoevent" and self.lap_timer is not None and isinstance(packet.get("name"), str):
+                self.lap_timer.event(packet["name"])  # a reset or a teleport spoils the lap in progress
             self._accept_geo(packet)
+        elif kind == "georoute":
+            self._accept_route(packet)
+        elif kind == "geosteps":
+            self._accept_steps(packet)
+        elif kind == "georoutepath":
+            self._accept_path(packet)
+        elif kind == "georouteack":
+            self._accept_ack(packet)
         elif kind == "geolive":
             self._accept_live(packet)
         elif kind == "catalog":
@@ -139,6 +187,11 @@ class Hub:
         if num(packet.get("spd")) and 0 <= packet["spd"] <= 400:
             message["spd"] = float(packet["spd"])
         self.live.append(message)
+        if self.lap_timer is not None:
+            clock = packet["st"] if num(packet.get("st")) else rt  # game time when the game sends it (see laps.py), else real time
+            self.lap_timer.feed(float(lat), float(lon), float(clock), self.vehicle)
+            if self.lap_timer.display is not None:  # (the clock on a dashboard moves with every position)
+                self._refresh()
 
     def add_trip_event(self, kind, trip_id):
         """A trip started or ended: told to the Trips page over the same feed as the live positions, so it can open a new trip the
@@ -150,6 +203,190 @@ class Hub:
     def live_since(self, seq):
         """The live positions newer than number `seq`, oldest first."""
         return [m for m in self.live if m["seq"] > seq]
+
+    def _accept_limit(self, packet):
+        """The speed limit at the car, from each `geoinfo`. A packet with no (or an unbelievable) limit means "none known", which
+        clears the channels, so a limit never outlives the road it belonged to."""
+        channels = {}
+        limit = packet.get("limit")
+        if isinstance(limit, dict):
+            ms = limit.get("ms")
+            if _finite(ms) and 0 < ms <= LIMIT_MAX_MS:
+                channels["geo.limit"] = float(ms)
+                # Only a limit read from a sign counts as "posted"; the rest is a guess from the kind of road (see triplog.py).
+                channels["geo.limitPosted"] = limit.get("mapped") is True
+        self._geo_limit = (channels, time.monotonic())
+        self._refresh()
+
+    def _accept_route(self, packet):
+        """The route's progress, from each `georoute`. No `gps` means "no route set", said as geo.route.active = false: for a
+        dashboard, silence would be ambiguous."""
+        gps = packet.get("gps")
+        channels = {"geo.route.active": isinstance(gps, dict)}
+        if isinstance(gps, dict):
+            remaining, eta, off, name = gps.get("remaining"), gps.get("eta"), gps.get("off"), gps.get("name")
+            if _finite(remaining) and 0 <= remaining <= ROUTE_MAX_M:
+                channels["geo.route.remaining"] = float(remaining)
+            if _finite(eta) and 0 <= eta <= ROUTE_MAX_S:
+                channels["geo.route.eta"] = float(eta)
+            if _finite(off) and 0 <= off <= ROUTE_MAX_M:
+                channels["geo.route.off"] = float(off)
+            if isinstance(name, str) and name.strip():
+                channels["geo.route.name"] = name.strip()[:ROUTE_NAME_MAX]
+        self._add_planning(channels, gps)
+        self._route_raw = None
+        if isinstance(gps, dict):
+            version, remaining = gps.get("routeVersion"), gps.get("remaining")
+            self._route_raw = {"version": version if _finite(version) else None, "remaining": float(remaining) if _finite(remaining) and 0 <= remaining <= ROUTE_MAX_M else None}
+        self._geo_route = (channels, time.monotonic())
+        self._add_maneuvers()
+        self._refresh()
+
+    def _add_planning(self, channels, gps):
+        """geo.route.planning and .replanning, from Earth's `planning` flag and the route's version (0 while there is no plan yet).
+        A plan for a route that already has one is a re-route (a wrong turn). Either is held for PLAN_SHOW_S, and a re-route done
+        between two packets, so never seen being made, still shows by its version having changed."""
+        now = time.monotonic()
+        if not isinstance(gps, dict):
+            self._plan_version = self._plan_shown = None  # (cleared: the next route starts afresh)
+            return
+        version = gps.get("routeVersion")
+        version = version if _finite(version) else 0
+        before, at = self._plan_version or (0, 0.0)
+        if now - at > GEO_TTL_S:
+            before = 0  # (the game went quiet: what it had then says nothing about now)
+        self._plan_version = (version, now)
+        if self._plan_shown is not None and now >= self._plan_shown[1]:
+            self._plan_shown = None
+        if gps.get("planning") is True:
+            self._plan_shown = (version > 0, now + PLAN_SHOW_S)
+        elif self._plan_shown is None and before > 0 and version > 0 and version != before:
+            self._plan_shown = (True, now + PLAN_SHOW_S)
+        shown = self._plan_shown
+        channels["geo.route.planning"] = shown is not None
+        channels["geo.route.replanning"] = shown is not None and shown[0]
+
+    def _accept_steps(self, packet):
+        """The steps of the route, once per route (and now and then again). Only plausible ones are kept: in order, in range, with short text."""
+        version, dist, steps = packet.get("version"), packet.get("dist"), packet.get("steps")
+        if not _finite(version) or not isinstance(steps, list) or not (dist is None or (_finite(dist) and 0 < dist <= ROUTE_MAX_M)):
+            self.stats["rejected_steps"] += 1
+            return
+        clean = []
+        for step in steps[:MAX_STEPS]:
+            offset = step.get("offset") if isinstance(step, dict) else None
+            if not _finite(offset) or not 0 <= offset <= ROUTE_MAX_M or (clean and offset < clean[-1]["offset"]):
+                continue
+            item = {"offset": float(offset)}
+            for key in ("type", "modifier", "name"):
+                value = step.get(key)
+                if isinstance(value, str) and value.strip():
+                    item[key] = " ".join("".join(c if c.isprintable() else " " for c in value).split())[:STEP_TEXT_MAX]
+            exit_no = step.get("exit")
+            if _finite(exit_no) and 1 <= exit_no <= MAX_EXIT:
+                item["exit"] = int(exit_no)
+            clean.append(item)
+        self._route_steps = {"version": version, "dist": float(dist) if dist is not None else None, "steps": clean}
+        self.stats["steps"] += 1
+        if self._add_maneuvers():
+            self._refresh()
+
+    @staticmethod
+    def _place(item):
+        """{"lat", "lon", "name"?} from something the game sent, or None if it is not a place on Earth."""
+        if not isinstance(item, dict) or not _finite(item.get("lat")) or not _finite(item.get("lon")):
+            return None
+        if not (-90.0 <= item["lat"] <= 90.0 and -180.0 <= item["lon"] <= 180.0):
+            return None
+        place = {"lat": round(float(item["lat"]), 6), "lon": round(float(item["lon"]), 6)}
+        name = item.get("name")
+        if isinstance(name, str) and name.strip():
+            place["name"] = " ".join("".join(c if c.isprintable() else " " for c in name).split())[:ROUTE_NAME_MAX]
+        return place
+
+    def _accept_path(self, packet):
+        """The planned route's line (once per route, and now and then again): its points, the destination and the stops still ahead. Only
+        plausible points are kept; a line of fewer than two is not a line."""
+        version, points = packet.get("version"), packet.get("points")
+        if not _finite(version) or not isinstance(points, list):
+            self.stats["rejected_path"] += 1
+            return
+        line = []
+        for p in points[:MAX_PATH_POINTS]:
+            if isinstance(p, (list, tuple)) and len(p) == 2 and _finite(p[0]) and _finite(p[1]) and -90.0 <= p[0] <= 90.0 and -180.0 <= p[1] <= 180.0:
+                line.append([round(float(p[0]), 6), round(float(p[1]), 6)])
+        if len(line) < 2:
+            self.stats["rejected_path"] += 1
+            return
+        waypoints = [w for w in (self._place(x) for x in (packet.get("waypoints") if isinstance(packet.get("waypoints"), list) else [])[:MAX_STOPS]) if w]
+        self._route_path = {"version": version, "points": line, "dest": self._place(packet.get("dest")), "waypoints": waypoints}
+        self.stats["paths"] += 1
+
+    def _accept_ack(self, packet):
+        """The game's answer to a command to set or clear the route: {"ok", "why"}. Counted, so a caller can tell a new answer from an old one."""
+        why = packet.get("why")
+        self.route_ack = {"seq": self.route_ack["seq"] + 1, "ok": packet.get("ok") is True, "why": why[:120] if isinstance(why, str) else None}
+
+    def route_state(self):
+        """The GPS route as the dashboards and maps want it: {"active": False}, or {"active": True, name, remaining (m), eta (s), off (m), version, and,
+        once the game has sent the line for this version of the route: points [[lat, lon]...], dest {lat, lon, name?}, waypoints [...]}. A route
+        is only as current as the game's latest word (see GEO_TTL_S)."""
+        channels, at = self._geo_route
+        if at is None or time.monotonic() - at > GEO_TTL_S or channels.get("geo.route.active") is not True:
+            return {"active": False}
+        raw = self._route_raw or {}
+        state = {"active": True, "version": raw.get("version")}
+        for key, name in (("name", "geo.route.name"), ("remaining", "geo.route.remaining"), ("eta", "geo.route.eta"), ("off", "geo.route.off")):
+            if name in channels:
+                state[key] = channels[name]
+        path = self._route_path
+        if path is not None and raw.get("version") is not None and path["version"] == raw["version"]:
+            state.update(points=path["points"], dest=path["dest"], waypoints=path["waypoints"])
+        return state
+
+    def _add_maneuvers(self):
+        """Add the next maneuver's channels to the route's. Returns whether there are any. They go in the same record as the progress, so
+        they expire with it (a maneuver is only as fresh as the car's progress along the route)."""
+        channels, at = self._geo_route
+        for key in [k for k in channels if k.startswith(("geo.route.next.", "geo.route.then."))]:
+            del channels[key]
+        raw, held = self._route_raw, self._route_steps
+        if at is None or raw is None or held is None or held["dist"] is None or raw["remaining"] is None or raw["version"] != held["version"]:
+            return False  # (steps are only believed for the route they belong to: after a re-plan the old ones are wrong)
+        traveled = max(0.0, held["dist"] - raw["remaining"])
+        upcoming = [st for st in held["steps"] if st["offset"] >= traveled - STEP_PASSED_M and st.get("type") != "depart"]
+        if not upcoming:
+            return False
+        nxt = upcoming[0]
+        channels["geo.route.next.distance"] = round(max(0.0, nxt["offset"] - traveled), 1)
+        self._put_step(channels, "geo.route.next", nxt)
+        if len(upcoming) > 1:
+            then = upcoming[1]
+            channels["geo.route.then.gap"] = round(max(0.0, then["offset"] - nxt["offset"]), 1)
+            self._put_step(channels, "geo.route.then", then)
+        return True
+
+    @staticmethod
+    def _put_step(channels, prefix, step):
+        for key, channel in (("type", "type"), ("modifier", "modifier"), ("name", "street"), ("exit", "exit")):
+            if key in step:
+                channels[f"{prefix}.{channel}"] = step[key]
+
+    def _refresh(self):
+        """Show a change at once, even if no car frame is due."""
+        self._rebuild()
+        self.frame_seq += 1
+
+    def _geo_channels(self):
+        """The world's channels that are still fresh."""
+        now = time.monotonic()
+        out = {}
+        for channels, at in (self._geo_limit, self._geo_route):
+            if at is not None and now - at <= GEO_TTL_S:
+                out.update(channels)
+        if self.lap_timer is not None:
+            out.update(self.lap_timer.channels(now))  # lap.*: laps.py (it drops them itself when the positions stop)
+        return out
 
     def _accept_geo(self, packet):
         """A position sample, place/limit/weather snapshot or event from the game's trip-log extension (BeamNG.Earth)."""
@@ -176,7 +413,7 @@ class Hub:
 
     def _rebuild(self):
         """Combine the electrics frame and the slow data into the current values, and announce a changed channel set."""
-        values = {**self._electrics, **self._extra, **self._trip}
+        values = {**self._electrics, **self._extra, **self._trip, **self._geo_channels()}
         # Channels whose value is None (a non-finite number) are listed nowhere, so compare like with like.
         names = {name for name, v in values.items() if v is not None}
         if names != self.channels.keys():

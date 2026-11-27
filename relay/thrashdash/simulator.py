@@ -179,6 +179,90 @@ def make_slow(t, vehicle="simulator"):
     }
 
 
+# The simulated car goes round a circular track (so the lap timer can be tried without the game): 160 m radius, counter-clockwise, the
+# distance it drives in _distance_at read off round the circle. Origin in Wellington, like the real captures.
+TRACK_LAT, TRACK_LON = -41.2865, 174.7762
+TRACK_RADIUS_M = 160.0
+EARTH_M = 6371008.8
+
+
+def _ll(x, y):
+    """Metres east and north of the track's centre -> (lat, lon)."""
+    return (TRACK_LAT + math.degrees(y / EARTH_M), TRACK_LON + math.degrees(x / (EARTH_M * math.cos(math.radians(TRACK_LAT)))))
+
+
+def track_position(t):
+    """Where the simulated car is t seconds in, as a (lat, lon, heading degrees)."""
+    angle = _distance_at(t) / TRACK_RADIUS_M
+    x, y = TRACK_RADIUS_M * math.cos(angle), TRACK_RADIUS_M * math.sin(angle)
+    # Counter-clockwise on a map: facing north (heading 0) at angle 0, then turning towards the west, so the heading falls as the angle grows.
+    return (*_ll(x, y), (-math.degrees(angle)) % 360)
+
+
+def make_live(t):
+    """A `geolive` packet (ten a second in the game): the car's place on the track and its speed."""
+    lat, lon, heading = track_position(t)
+    return {"v": PROTOCOL_VERSION, "type": "geolive", "rt": t, "lat": lat, "lon": lon, "hdg": heading, "spd": _speed_at(t)}
+
+
+def track_circuit(sectors=True):
+    """A circuit for the simulated track, in the shape the circuits API takes: the start line across the road at angle 0 (due east of
+    the centre, where the car is heading north), and a sector line on the far side."""
+    r = TRACK_RADIUS_M
+    gate = lambda a, b: {"a": list(_ll(*a)), "b": list(_ll(*b))}  # noqa: E731
+    circuit = {"name": "Simulated track", "kind": "circuit", "enabled": True, "start": gate((r - 25, 0), (r + 25, 0)), "sectors": []}
+    if sectors:
+        circuit["sectors"] = [gate((-(r - 25), 0), (-(r + 25), 0))]
+    return circuit
+
+
+def limit_at(t):
+    """The speed limit the simulated road has t seconds in, as the game's feed gives it: (m/s, posted?) or None where none is known.
+    Some stretches are posted, some only a guess from the kind of road, and the stop has none, so every state can be seen."""
+    p = (t % CYCLE_S) / CYCLE_S
+    if p < 0.15:
+        return 13.89, True
+    if p < 0.30:
+        return 22.22, False
+    if p < 0.65:
+        return 27.78, True
+    if p < 0.85:
+        return 13.89, True
+    return None
+
+
+# The simulated route and its steps, in the shape BeamNG.Earth gives them (a real one is in docs/route-steps-sample.json).
+ROUTE_LENGTH_M = 4200
+ROUTE_STEPS = [
+    {"type": "depart", "name": "Hutt Road", "offset": 0, "distance": 600},
+    {"type": "turn", "modifier": "left", "name": "Oriental Parade", "offset": 600, "distance": 900},
+    {"type": "roundabout", "exit": 2, "offset": 1500, "distance": 30},
+    {"type": "exit roundabout", "name": "Evans Bay Parade", "offset": 1530, "distance": 870},
+    {"type": "turn", "modifier": "slight right", "name": "Rongotai Road", "offset": 2400, "distance": 1500},
+    {"type": "fork", "modifier": "slight left", "name": "Cobham Drive", "offset": 3900, "distance": 300},
+    {"type": "arrive", "modifier": "left", "offset": 4200, "distance": 0},
+]
+
+
+def make_geo(t):
+    """The world packets (limit, route progress, and now and then the route's steps), once a second, in the shape trips.lua sends them. The route is set for the
+    first 30 s of each minute and then cleared, with a short spell off the route."""
+    limit = limit_at(t)
+    info = {"v": PROTOCOL_VERSION, "type": "geoinfo", "rt": t}
+    if limit is not None:
+        info["limit"] = {"ms": limit[0], "mapped": limit[1], "unit": "kmh"}
+    route = {"v": PROTOCOL_VERSION, "type": "georoute", "rt": t}
+    cycle = t % 60
+    packets = [info, route]
+    if cycle < 30:
+        left = ROUTE_LENGTH_M - cycle * 120
+        route["gps"] = {"remaining": left, "eta": left / 14.0, "off": 35.0 if 12 < cycle < 16 else 0.0, "name": "Oriental Bay", "planning": False,
+                        "routeVersion": 1 + int(t // 60)}
+        if int(cycle) % 20 == 0:  # the steps come when the route appears and now and then after, like trips.lua
+            packets.append({"v": PROTOCOL_VERSION, "type": "geosteps", "rt": t, "version": 1 + int(t // 60), "dist": ROUTE_LENGTH_M, "steps": ROUTE_STEPS})
+    return tuple(packets)
+
+
 async def run(hub, rate=RATE_HZ, vehicles=("simulator",), period=15.0):
     """Feed the hub forever. With several `vehicles`, they take turns, so vehicle-switching can be tried without the game."""
     start = time.monotonic()
@@ -191,4 +275,9 @@ async def run(hub, rate=RATE_HZ, vehicles=("simulator",), period=15.0):
         hub.ingest_packet(make_frame(elapsed, n, vehicle))
         if n % 8 == 0:  # ~4 per second, like the mod
             hub.ingest_packet(make_slow(elapsed, vehicle))
+        if n % RATE_HZ == 0:  # once a second, like trips.lua
+            for packet in make_geo(elapsed):
+                hub.ingest_packet(packet)
+        if n % (RATE_HZ // 10) == 0:  # ten a second, like the live position in the game
+            hub.ingest_packet(make_live(elapsed))
         await asyncio.sleep(interval)

@@ -96,6 +96,19 @@
 .w-gmeter.sk-backlit .gm-now { font-family: "DSEG7 Classic", monospace; font-weight: 400; color: #8fdcff; }
 
 /* ---- trip computer in a skin ---- */
+.w-route.w-skinned, .w-limit.w-skinned, .w-lap.w-skinned { background: #0b0c0e; border: 1px solid #3a4048; }
+.w-lap.w-skinned .lp-title, .w-lap.w-skinned .lp-label, .w-lap.w-skinned .lp-value, .w-lap.w-skinned .lp-lap, .w-lap.w-skinned .lp-sec-t { font-family: "Barlow Condensed", sans-serif; }
+.w-lap.w-skinned .lp-time, .w-lap.w-skinned .lp-delta { font-family: "Barlow Condensed", sans-serif; }
+.w-lap.w-skinned .lp-row { border-top-color: #2a2f36; }
+.w-lap.sk-backlit { background: #04101c; border-color: #1c4a7a; box-shadow: inset 0 0 12px rgba(47, 155, 255, 0.15); }
+.w-lap.sk-backlit .lp-title, .w-lap.sk-backlit .lp-label, .w-lap.sk-backlit .lp-sec-n { color: #5fa9e0; }
+.w-lap.sk-backlit .lp-time, .w-lap.sk-backlit .lp-value, .w-lap.sk-backlit .lp-lap, .w-lap.sk-backlit .lp-sec-t { font-family: "DSEG7 Classic", monospace; font-weight: 400; color: #8fdcff; text-shadow: 0 0 6px rgba(77, 178, 255, 0.7); }
+.w-route.w-skinned .rt-title, .w-route.w-skinned .rt-label, .w-route.w-skinned .rt-value, .w-route.w-skinned .rt-dest, .w-limit.w-skinned .lm-cap, .w-limit.w-skinned .lm-now { font-family: "Barlow Condensed", sans-serif; }
+.w-route.w-skinned .rt-value { color: #dfe3e8; }
+.w-route.w-skinned .rt-row { border-top-color: #2a2f36; }
+.w-route.sk-backlit, .w-limit.sk-backlit { background: #04101c; border-color: #1c4a7a; box-shadow: inset 0 0 12px rgba(47, 155, 255, 0.15); }
+.w-route.sk-backlit .rt-title, .w-route.sk-backlit .rt-label, .w-limit.sk-backlit .lm-cap { color: #5fa9e0; }
+.w-route.sk-backlit .rt-ndist, .w-route.sk-backlit .rt-arrow, .w-route.sk-backlit .rt-value, .w-route.sk-backlit .rt-dest, .w-limit.sk-backlit .lm-now { color: #8fdcff; text-shadow: 0 0 6px rgba(77, 178, 255, 0.7); }
 .w-trip.w-skinned { background: #0b0c0e; border: 1px solid #3a4048; }
 .w-trip.w-skinned .tr-title, .w-trip.w-skinned .tr-label, .w-trip.w-skinned .tr-value, .w-trip.w-skinned .tr-reset { font-family: "Barlow Condensed", sans-serif; }
 .w-trip.w-skinned .tr-value { font-size: 22px; color: #dfe3e8; }

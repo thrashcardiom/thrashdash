@@ -36,7 +36,16 @@ a note against one of its waypoints is another ({"k":"note","t":12.3,"text":"gre
 
     {"k":"star","v":true}
 
-so renaming and starring never rewrite the file. A deleted trip is moved to the "trash" folder inside the trip log folder, not erased.
+and so are its tags (the last one wins; an empty list takes them all away):
+
+    {"k":"tags","v":["Track","Hill climb"]}
+
+and so is its fuel price, which a trip also has in its first line (the price at the moment it started, so a later change of price never
+changes what an old drive cost; the last price line wins, and null takes the price away):
+
+    {"k":"price","v":{"liquid":2.45,"electric":0.31,"currency":"$"}}
+
+so renaming, starring, tagging and pricing never rewrite the file. A deleted trip is moved to the "trash" folder inside the trip log folder, not erased.
 """
 import json
 import math
@@ -49,6 +58,7 @@ from pathlib import Path
 
 from . import tripstats
 from .trip import energy_kind
+from .validate import clean_fuel_price
 
 # ---- the rules (all in one place so they are easy to tune) -----------------------------------------------------------
 JUMP_SPEED_MS = 100.0  # an implied speed above this (360 km/h) between two samples is a jump, not driving
@@ -115,6 +125,61 @@ def clean_name(value):
     return " ".join("".join(c if c.isprintable() else " " for c in value).split())[:MAX_NAME_CHARS].strip()
 
 
+# Tags: short labels the user puts on a trip (commute, track...). The PRESET_TAGS are offered to begin with; anyone may add their own, which are
+# then offered too (the Trips page lists the presets and every tag in use), so there is no separate list of tags to keep.
+PRESET_TAGS = ("Commute", "Tour", "Track", "Off-road", "Test", "Event")
+MAX_TAGS = 8  # on one trip
+MAX_TAG_CHARS = 24
+_PRESET_BY_LOWER = {t.lower(): t for t in PRESET_TAGS}
+
+
+def clean_tags(value, strict=True):
+    """A trip's tags as stored: one line each, no control characters, at most MAX_TAG_CHARS, no repeats (in any case; a preset is written the
+    way the preset is, so "commute" is "Commute"), in the order given. Raises ValueError if `value` is not a list of text, or (strict) has
+    more than MAX_TAGS; not strict, the first MAX_TAGS are kept (what is done with the tags of two trips joined, and with a damaged file)."""
+    if not isinstance(value, list):
+        raise ValueError("tags must be a list")
+    out, seen = [], set()
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("a tag must be text")
+        tag = " ".join("".join(c if c.isprintable() else " " for c in item).split())[:MAX_TAG_CHARS].strip()
+        if not tag or tag.lower() in seen:
+            continue
+        seen.add(tag.lower())
+        out.append(_PRESET_BY_LOWER.get(tag.lower(), tag))
+    if len(out) > MAX_TAGS:
+        if strict:
+            raise ValueError(f"at most {MAX_TAGS} tags on a trip")
+        out = out[:MAX_TAGS]
+    return out
+
+
+def stored_tags(value):
+    """The tags in a trip file's line, or none if the line is not usable: a damaged file must not stop its trip from being read."""
+    try:
+        return clean_tags(value, strict=False)
+    except ValueError:
+        return []
+
+
+def clean_price(value):
+    """A trip's fuel price as stored ({"liquid": per litre, "electric": per kWh, "currency"}), or None when it holds no price at all (both
+    prices 0, or nothing). Raises ValueError for something that is not a price."""
+    if value is None:
+        return None
+    price = clean_fuel_price(value, "price")
+    return price if price["liquid"] > 0 or price["electric"] > 0 else None
+
+
+def stored_price(value):
+    """The price in a trip file, or None if it is not usable: a damaged file must not stop its trip from being read."""
+    try:
+        return clean_price(value)
+    except ValueError:
+        return None
+
+
 def _short(value, limit=80):
     return value[:limit] if isinstance(value, str) else None
 
@@ -175,6 +240,7 @@ class TripLog:
         self.idle_end_s = idle_end_s
         self.say = say or (lambda text: print(text, file=sys.stderr))
         self.on_change = None  # called as on_change("started" | "ended", trip_id) the moment a trip file is made or finished or thrown away (see hub.py)
+        self.price_source = None  # called with no arguments for the fuel price to write into a trip as it starts ({"liquid", "electric", "currency"}), or None
         self.on_notice = on_notice  # called as on_notice("started" | "ended", info) when a trip really starts or ends (see tripnotice.py)
         self.stats = Counter()
         self._trip = None
@@ -303,6 +369,9 @@ class TripLog:
         self._trip = trip
         header = {"k": "trip", "fmt": 1, "id": tid, "ts": first.ts, "vehicle": s.model, "veh": s.veh,
                   "energy": energy_kind(car.get("energy.electric"), car.get("energy.liquid"))}
+        price = self._current_price()
+        if price is not None:
+            header["price"] = price
         if not self._write(header):
             return
         self.stats["trips_opened"] += 1
@@ -315,6 +384,15 @@ class TripLog:
             trip.top = s.spd
         trip.dist += haversine_m(first.lat, first.lon, s.lat, s.lon) if first is not s else 0.0
         self._write_point(trip, s, car)
+
+    def _current_price(self):
+        """The fuel price to copy into a trip that is starting: the setting as it is now, or None (none set, or no source)."""
+        if self.price_source is None:
+            return None
+        try:
+            return stored_price(self.price_source())
+        except Exception:  # (a bad setting must never stop a trip from being recorded)
+            return None
 
     def _write_point(self, trip, s, car):
         p = {"k": "p", "t": round(s.rt - trip.start_rt, 2), "la": round(s.lat, 7), "lo": round(s.lon, 7)}
@@ -592,9 +670,9 @@ class TripLog:
             head = json.loads(first)
             if not isinstance(head, dict) or head.get("k") != "trip":
                 return None
-            out = {"id": head["id"], "ts": head.get("ts", 0), "vehicle": head.get("vehicle"), "energy": head.get("energy"), "ended": False, "title": None, "starred": False,
+            out = {"id": head["id"], "ts": head.get("ts", 0), "vehicle": head.get("vehicle"), "energy": head.get("energy"), "ended": False, "title": None, "starred": False, "tags": [], "price": stored_price(head.get("price")),
                    "imported": head.get("imported") if isinstance(head.get("imported"), str) else None}
-            titled = starred = False
+            titled = starred = tagged = priced = False
             for raw in reversed(tail):
                 try:
                     obj = json.loads(raw)
@@ -611,6 +689,16 @@ class TripLog:
                     if not starred:  # (the last star line is the one that counts)
                         starred = True
                         out["starred"] = obj.get("v") is True
+                    continue
+                if obj.get("k") == "tags":
+                    if not tagged:  # (and the last tags line)
+                        tagged = True
+                        out["tags"] = stored_tags(obj.get("v"))
+                    continue
+                if obj.get("k") == "price":
+                    if not priced:  # (and the last price line, which beats the price the trip began with)
+                        priced = True
+                        out["price"] = stored_price(obj.get("v"))
                     continue
                 if obj.get("k") == "end":
                     out.update(ended=True, reason=obj.get("reason"), duration=obj.get("t"), distance=obj.get("dist"), top=obj.get("top"), points=obj.get("n"))
@@ -653,6 +741,21 @@ class TripLog:
             raise ValueError("starred must be true or false")
         self._append(self._path_of(trip_id), {"k": "star", "v": starred})
         return starred
+
+    def tag(self, trip_id, tags):
+        """Set an ended trip's tags (the whole list: an empty one takes them all away). Like a name, a line added to the end of the file.
+        Returns the tags as stored. Raises NotFound, Busy, or ValueError for something that is not a list of text, or too many."""
+        clean = clean_tags(tags)
+        self._append(self._path_of(trip_id), {"k": "tags", "v": clean})
+        return clean
+
+    def set_price(self, trip_id, price):
+        """Set the fuel price of an ended trip (None takes it away): a line added to the end of the file, so the price the trip began with
+        is kept in its first line but no longer counts. Returns the price as stored (None for no price). Raises NotFound, Busy, or
+        ValueError for something that is not a price."""
+        clean = clean_price(price)
+        self._append(self._path_of(trip_id), {"k": "price", "v": clean})
+        return clean
 
     def note(self, trip_id, t, text):
         """Write a note against one of an ended trip's waypoints (the one at `t` seconds into the trip); an empty note takes it away. Like a
@@ -787,7 +890,8 @@ class TripLog:
             stats = item.get("stats") or {}
             out.append({"id": item["id"], "ts": item["ts"], "vehicle": item.get("vehicle"), "title": item.get("title"), "name": stats.get("name"),
                         "countries": stats.get("countries", []), "dist": item.get("distance") or 0, "dur": item.get("duration") or 0,
-                        "top": item.get("top") or 0, "recording": item["recording"], "line": line})
+                        "top": item.get("top") or 0, "recording": item["recording"], "tags": item.get("tags", []),
+                        "from": stats.get("from"), "to": stats.get("to"), "line": line})
         return out
 
     def live(self, trip_id, after):
@@ -821,7 +925,7 @@ class TripLog:
         try:
             if path.stat().st_size > _MAX_READ_BYTES:
                 return None
-            out = {"header": None, "points": [], "info": [], "events": [], "pois": [], "end": None, "title": None, "starred": False}
+            out = {"header": None, "points": [], "info": [], "events": [], "pois": [], "end": None, "title": None, "starred": False, "tags": [], "price": None}
             notes = {}
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 for line in f:
@@ -832,6 +936,7 @@ class TripLog:
                     kind = obj.get("k") if isinstance(obj, dict) else None
                     if kind == "trip" and out["header"] is None:
                         out["header"] = obj
+                        out["price"] = stored_price(obj.get("price"))
                     elif kind == "p":
                         out["points"].append(obj)
                     elif kind == "i":
@@ -844,6 +949,10 @@ class TripLog:
                         out["title"] = obj.get("name") if isinstance(obj.get("name"), str) and obj.get("name") else None
                     elif kind == "star":
                         out["starred"] = obj.get("v") is True
+                    elif kind == "tags":
+                        out["tags"] = stored_tags(obj.get("v"))
+                    elif kind == "price":
+                        out["price"] = stored_price(obj.get("v"))
                     elif kind == "poi":
                         out["pois"].append(obj)
                     elif kind == "note" and _num(obj.get("t")):

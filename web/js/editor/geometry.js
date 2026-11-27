@@ -90,3 +90,70 @@ export function boundsOf(rects) {
   }
   return box && { x: box.x, y: box.y, w: box.x2 - box.x, h: box.y2 - box.y };
 }
+
+// ---- marquee selection, align and distribute ----------------------------------------------------------------------------------
+
+/** The rectangle between two corner points (in any order): {x, y, w, h}. */
+export function rectBetween(a, b) {
+  return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) };
+}
+
+/** Whether two rectangles overlap (touching edges do not count). */
+export const rectsOverlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/** The ids of the widgets a marquee touches. `widgets` are {id, x, y, w, h}; any overlap counts, as in most editors. */
+export const widgetsInRect = (widgets, rect) => widgets.filter((w) => rectsOverlap(w, rect)).map((w) => w.id);
+
+export const ALIGN_MODES = ["left", "centre", "right", "top", "middle", "bottom"];
+
+/**
+ * Line rectangles up with each other, against the box around all of them: "left", "centre" (the middle of each, horizontally) and
+ * "right" move them sideways; "top", "middle" and "bottom" move them up and down. Sizes never change, and nothing leaves the box.
+ * @param {Map<string, {x:number,y:number,w:number,h:number}>} rects
+ * @returns {Map<string, {x:number,y:number,w:number,h:number}>} every rectangle given, moved where needed
+ */
+export function alignRects(rects, mode) {
+  const box = boundsOf(rects.values());
+  const out = new Map();
+  if (!box || !ALIGN_MODES.includes(mode)) {
+    for (const [id, r] of rects) out.set(id, { ...r });
+    return out;
+  }
+  for (const [id, r] of rects) {
+    const moved = { ...r };
+    if (mode === "left") moved.x = box.x;
+    else if (mode === "centre") moved.x = Math.round(box.x + (box.w - r.w) / 2);
+    else if (mode === "right") moved.x = box.x + box.w - r.w;
+    else if (mode === "top") moved.y = box.y;
+    else if (mode === "middle") moved.y = Math.round(box.y + (box.h - r.h) / 2);
+    else moved.y = box.y + box.h - r.h;
+    out.set(id, moved);
+  }
+  return out;
+}
+
+/**
+ * Space rectangles evenly along one axis ("h" across, "v" down): the first and last stay where they are, and the gaps between each
+ * neighbouring pair are made equal (to the whole pixel: the gaps differ by at most one). Needs three or more; with fewer nothing moves.
+ */
+export function distributeRects(rects, axis) {
+  const out = new Map();
+  for (const [id, r] of rects) out.set(id, { ...r });
+  if (rects.size < 3) return out;
+  const horizontal = axis === "h";
+  const pos = (r) => (horizontal ? r.x : r.y);
+  const size = (r) => (horizontal ? r.w : r.h);
+  const ordered = [...rects].sort((a, b) => pos(a[1]) - pos(b[1]) || String(a[0]).localeCompare(String(b[0])));
+  const first = ordered[0][1];
+  const last = ordered[ordered.length - 1][1];
+  const span = pos(last) + size(last) - pos(first);
+  const gap = (span - ordered.reduce((sum, [, r]) => sum + size(r), 0)) / (ordered.length - 1);
+  let cursor = pos(first);
+  for (let i = 0; i < ordered.length; i++) {
+    const [id, r] = ordered[i];
+    const at = i === ordered.length - 1 ? pos(last) : Math.round(cursor);
+    out.set(id, horizontal ? { ...r, x: at } : { ...r, y: at });
+    cursor += size(r) + gap;
+  }
+  return out;
+}

@@ -73,6 +73,8 @@ export function pickChannel({ channels, getValues, selected, title = "Choose a c
       addGroup("Damage", groups.damage);
       addGroup("Component states", groups.states);
       addGroup("Trip computer", groups.trip);
+      addGroup("Road and route", groups.geo);
+      addGroup("Lap timing", groups.lap);
       addGroup("This vehicle", groups.car);
 
       // Minor channels stay out of the way unless asked for (or searched for).
