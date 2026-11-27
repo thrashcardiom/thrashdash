@@ -411,7 +411,7 @@ The **Backup, restore and import** box can **import a GPX file**: a drive record
 
 The trip log needs BeamNG.Earth running, which starts BeamNG.drive itself. If you always start them together, ThrashDash can start Earth for you:
 
-1. On the Trips page, open **Popups and settings**, and under **BeamNG.Earth** type the **folder** Earth is kept in (for example `/home/you/Downloads`) and press **Save**. The note shows which file would be started.
+1. On the Trips page, open **Popups and settings**, and under **BeamNG.Earth** type the **folder** Earth is kept in (for example `/home/you/Downloads`, or `C:\Users\you\Downloads` on Windows) and press **Save**. The note shows which file would be started.
 2. From then on, starting ThrashDash starts Earth too. Earth starts the game as it always does.
 
 - **The newest version is chosen.** Earth is updated often and its file name carries the version, so the setting is a folder, and ThrashDash starts the **highest version number** in it (1.10.1 before 1.9.1), not the most recently downloaded file. It ignores the update notes, checksums and partial downloads. You can also name one file.
@@ -419,7 +419,7 @@ The trip log needs BeamNG.Earth running, which starts BeamNG.drive itself. If yo
 - **It quits when Earth does.** ThrashDash follows Earth: when Earth has closed, ThrashDash closes its windows and quits, as the Quit button does. **ThrashDash never closes Earth**; quit ThrashDash first and Earth carries on. If Earth is already running, a second copy is not started, and ThrashDash still follows the one that is.
 - **Earth's messages** go to `earth.log` in [the data folder](docs/reference.md#where-things-are-stored) (the latest run).
 - **From the command line**: `--with-earth /path/to/folder-or-file` for one run (it overrides the setting), `--no-earth` to skip it for one run. A launcher or shortcut that runs ThrashDash with `--with-earth` works without setting anything.
-- **Windows**: the same, looking for `BeamNG.Earth*.exe` files. This is untested.
+- **Windows**: the same, looking for `BeamNG.Earth*.exe` files. Tested on Windows 11 with the real BeamNG.Earth: with the folder set, starting `thrashdash.exe` starts Earth, and so does `thrashdash-cli.exe --with-earth`.
 
 ## Windows: remembering, saving and closing
 
@@ -532,7 +532,7 @@ Useful command-line options (the full list is in the reference): `--simulate` (f
 ## Known limitations
 
 - **Windows is lightly tested.** The Windows build recipe (`packaging/build.ps1`) has been used to build `thrashdash.exe` and it ran and worked on one Windows machine, but it has seen far less use than the Linux version. If `--install-mod` cannot find the game's user folder, name it yourself.
-- **What has been tried in the real game.** Positions, places, limits, weather, peak G and impacts have been seen in real drives. Waypoints, the places named at stops, and starting BeamNG.Earth along with ThrashDash have so far been tested against stand-ins (a fake game extension and a fake Earth), not the real thing, and the Windows launcher not at all, so report anything that differs.
+- **What has been tried in the real game.** Positions, places, limits, weather, peak G and impacts have been seen in real drives. Waypoints and the places named at stops have so far been tested against a stand-in (a fake game extension), not the real thing, so report anything that differs. Starting BeamNG.Earth along with ThrashDash has been tried with the real Earth on both Linux and Windows 11.
 - **The trip log needs BeamNG.Earth** and was developed against its modding API, version 1.8 (the Earth app 1.9). A future change to that API could stop the log until ThrashDash is updated: the game extension does nothing, harmlessly, when the API is not there.
 - **Speeding is counted only where a limit is posted**, which is about one road in ten in BeamNG.Earth's data. The figure is honest about how much of the trip it covers, but it is not a full picture.
 - **Peak G includes crashes.** It is the strongest force on the car in the trip, from the car's own smoothed acceleration, so a hard impact can be the peak. It is the strongest second, not a single instant.
