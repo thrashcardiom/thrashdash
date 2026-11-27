@@ -83,12 +83,21 @@ class TripNotices:
         self.game_addr = addr
         self.game_seen = self.clock()
 
+    def game_connected(self):
+        """Whether the game's extension has sent a position lately (so a message sent to it has somewhere to go)."""
+        return self.transport is not None and self.game_addr is not None and self.game_seen is not None and self.clock() - self.game_seen <= GAME_FRESH_S
+
     def _to_game(self, title, message, seconds=POPUP_SECONDS):
+        return self.send_to_game({"type": "toast", "title": title, "msg": message, "seconds": seconds})
+
+    def send_to_game(self, payload):
+        """Send any message (a dict) to the game's extension: a popup, or a command such as setting the GPS route. Returns whether it could be
+        sent (the game has sent a position lately); it says nothing about whether the game acted on it."""
         if self.transport is None or self.game_addr is None or self.game_seen is None or self.clock() - self.game_seen > GAME_FRESH_S:
             self.stats["game_unreachable"] += 1  # the game has not sent a position lately (no BeamNG.Earth level loaded, or it is closed)
             return False
         try:
-            self.transport.sendto(json.dumps({"type": "toast", "title": title, "msg": message, "seconds": seconds}).encode(), self.game_addr)
+            self.transport.sendto(json.dumps(payload).encode(), self.game_addr)
             self.stats["game_sent"] += 1
             return True
         except (OSError, ValueError, AttributeError):  # (a closed socket, an odd address): a popup is never worth a failure

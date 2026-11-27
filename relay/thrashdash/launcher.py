@@ -107,6 +107,9 @@ def window_args(exe, url, profile, size=(1200, 420), position=None, fullscreen=F
         f"--window-size={size[0]},{size[1]}",
         "--no-first-run",
         "--no-default-browser-check",
+        # Alert sounds (an option, per window) are held back by a browser until the window has been clicked; a dashboard on a second monitor
+        # may never be, so this profile, which only ever shows ThrashDash's own pages, is told it may play them.
+        "--autoplay-policy=no-user-gesture-required",
     ]
     if position is not None:
         args.append(f"--window-position={position[0]},{position[1]}")

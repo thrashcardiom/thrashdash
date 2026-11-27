@@ -18,6 +18,8 @@
         <span id="count" class="muted"></span>
         <button id="all" class="btn small" type="button" aria-pressed="false" title="Every trip drawn on one map">All trips</button>
         <button id="stats-btn" class="btn small next" type="button" aria-pressed="false" title="Totals, records and each vehicle's economy, over all your trips">Stats</button>
+        <button id="route-btn" class="btn small" type="button" aria-pressed="false" title="Plan a GPS route on a big map and send it to the game">Route</button>
+        <button id="circuits-btn" class="btn small" type="button" aria-pressed="false" title="Lap and sector timing: draw a circuit on a drive, and see the laps timed on it">Circuits</button>
         <button id="quit" class="btn small quit" type="button" title="Stop ThrashDash. Its windows close with it (they come back next time it starts)" hidden>Quit</button>
       </header>
       <p id="live" class="live" hidden></p>
@@ -40,6 +42,14 @@
           <legend>What counts as an impact</legend>
           <label>Body damage of at least <input id="rule-damage" type="number" min="0.1" max="100" step="0.1" aria-label="Percent of body damage that makes an impact"> %</label>
           <label>or a force of at least <input id="rule-g" type="number" min="0" max="20" step="0.5" aria-label="Force in g that makes an impact, 0 for off"> g (0: ignore force)</label>
+        </fieldset>
+        <fieldset id="price-settings" class="pop-group" hidden>
+          <legend>Fuel price</legend>
+          <label>Per litre <input id="price-liquid" type="number" min="0" max="1000" step="0.001" aria-label="Price of a litre of fuel, 0 for none"></label>
+          <label>Per kWh <input id="price-electric" type="number" min="0" max="1000" step="0.001" aria-label="Price of a kilowatt hour of electricity, 0 for none"></label>
+          <label>Currency <input id="price-currency" type="text" maxlength="4" size="4" placeholder="$" aria-label="Currency symbol or code"></label>
+          <button id="price-save" class="btn small" type="button">Save</button>
+          <p id="price-note" class="muted" role="status">Each trip is given the price as it is when it starts and keeps it, so changing the price later never changes what an old drive cost. Leave both at 0 for no costs.</p>
         </fieldset>
         <fieldset id="earth-box" class="pop-group" hidden>
           <legend>BeamNG.Earth</legend>
@@ -65,6 +75,7 @@
       </details>
       <input id="search" class="search" type="search" placeholder="Search trips" aria-label="Search trips by name, vehicle or date" autocomplete="off" spellcheck="false" hidden>
       <label id="starred-row" class="starred-row" hidden><input id="starred-only" type="checkbox"> Starred only</label>
+      <label id="tag-filter-row" class="starred-row" hidden>Tag <select id="tag-filter" aria-label="Show only trips with this tag"></select></label>
       <div id="selbar" class="selbar" hidden>
         <span id="sel-count"></span>
         <button id="sel-all" class="btn small" type="button" title="Tick every trip in the list as it is shown now (the search and Starred only narrow it)">Select all shown</button>
@@ -88,6 +99,7 @@
           <label>When <select id="f-when"></select></label>
           <label>Vehicle <select id="f-vehicle"></select></label>
           <label>Country <select id="f-country"></select></label>
+          <label>Tag <select id="f-tag"></select></label>
         </div>
         <div class="mapbox">
           <div id="ovmap" role="img" aria-label="Map of the trips"></div>
@@ -112,11 +124,13 @@
             <h2>Stats</h2>
             <p id="st-sub" class="muted"></p>
           </div>
+          <div class="actions"><button id="st-csv" class="btn" type="button" title="One row for each trip shown (the filters apply), in metres and seconds, for a spreadsheet">Download as CSV</button></div>
         </header>
         <div class="filters" role="group" aria-label="Filter the stats">
           <label>When <select id="sf-when"></select></label>
           <label>Vehicle <select id="sf-vehicle"></select></label>
           <label>Country <select id="sf-country"></select></label>
+          <label>Tag <select id="sf-tag"></select></label>
         </div>
         <section id="st-tiles" class="tiles" aria-label="Totals"></section>
         <h3 class="st-h">Records</h3>
@@ -126,6 +140,99 @@
         <h3 class="st-h">Distance by month</h3>
         <div id="st-months" class="months" role="img" aria-label="Distance driven in each month"></div>
         <p class="key muted">These add up the trips that have finished. Fuel economy needs trips of at least half a kilometre with a fuel reading.</p>
+      </article>
+      <article id="route-view" hidden>
+        <header class="head">
+          <button id="rv-back" class="btn back" type="button" aria-label="Back to the list">&larr; Trips</button>
+          <div class="titles">
+            <h2>Route</h2>
+            <p id="rv-status" class="muted"></p>
+          </div>
+          <div id="rv-edit" class="actions" hidden>
+            <button id="rv-send" class="btn" type="button" title="Ask BeamNG.Earth to plan a route through these stops, the last the destination" disabled>Send to the game</button>
+            <button id="rv-clear" class="btn" type="button" title="Clear the GPS route in the game" disabled>Clear the route in the game</button>
+          </div>
+        </header>
+        <p id="rv-note" class="cir-note" role="status" hidden></p>
+        <div class="cir-grid">
+          <div class="rv-side">
+            <h3 class="st-h">Stops</h3>
+            <p id="rv-summary" class="muted"></p>
+            <p id="rv-limit" class="muted"></p>
+            <ol id="rv-stops" class="rv-stops" aria-label="The stops of the route"></ol>
+            <button id="rv-clear-stops" class="btn small" type="button" disabled>Clear the stops</button>
+            <h3 class="st-h">Saved destinations</h3>
+            <ul id="rv-saved" class="rv-saved" aria-label="Saved destinations"></ul>
+            <h3 class="st-h">Places from your trips</h3>
+            <div class="rv-places">
+              <select id="rv-places" aria-label="A place from an earlier trip"></select>
+              <button id="rv-places-add" class="btn small" type="button" disabled>Add</button>
+            </div>
+            <p class="muted rv-help">Click the map to add a stop. BeamNG.Earth plans the real road route when you send it, and it is drawn here and on the live map.</p>
+          </div>
+          <div class="mapbox rv-mapbox">
+            <div id="rvmap" role="img" aria-label="Map for planning a route"></div>
+            <div class="base" role="group" aria-label="Map type">
+              <button data-base="street" type="button" aria-pressed="true">Street</button>
+              <button data-base="sat" type="button" aria-pressed="false">Satellite</button>
+            </div>
+          </div>
+        </div>
+      </article>
+      <article id="circuits" hidden>
+        <header class="head">
+          <button id="cir-back" class="btn back" type="button" aria-label="Back to the list">&larr; Trips</button>
+          <div class="titles">
+            <h2>Circuits</h2>
+            <p id="cir-sub" class="muted"></p>
+          </div>
+          <div class="actions"><button id="cir-new" class="btn" type="button" title="Draw a new circuit on a trip you drove" hidden>New circuit</button></div>
+        </header>
+        <div class="cir-grid">
+          <ul id="cir-list" class="cir-list" aria-label="Circuits"></ul>
+          <div class="cir-main">
+            <p id="cir-hint" class="empty"></p>
+            <div id="cir-body" hidden>
+              <h3 id="cir-title" class="st-h"></h3>
+              <p id="cir-note" class="cir-note" role="status" hidden></p>
+              <div id="cir-editor" class="cir-editor" hidden>
+                <div class="cir-row">
+                  <label>Name <input id="cir-name" type="text" maxlength="40" autocomplete="off" spellcheck="false"></label>
+                  <label>Kind
+                    <select id="cir-kind"><option value="circuit">Closed circuit (laps)</option><option value="stage">Stage (start to finish)</option></select>
+                  </label>
+                </div>
+                <div class="cir-row">
+                  <label>Draw on the trip <select id="cir-trip" aria-describedby="cir-help"></select></label>
+                  <label>Line width <input id="cir-width" type="number" step="1" value="30" aria-label="Width of a new line in metres"> m</label>
+                </div>
+                <p id="cir-help" class="muted cir-help">Pick a trip you drove this circuit on. Press a line button, then click the route where it goes: the line is drawn across the road, facing the way you were driving. Sector lines split a lap: two lines make three sectors. Put them in the order a lap meets them.</p>
+                <div class="cir-tools" role="group" aria-label="Place a line">
+                  <button id="cir-start-tool" class="btn" type="button" aria-pressed="false">Start/finish line</button>
+                  <button id="cir-sector-tool" class="btn" type="button" aria-pressed="false">Add a sector line</button>
+                  <button id="cir-finish-tool" class="btn" type="button" aria-pressed="false" hidden>Finish line</button>
+                </div>
+                <ul id="cir-gates" class="cir-gates" aria-label="The lines"></ul>
+                <p id="cir-problems" class="cir-problems"></p>
+                <div class="cir-tools">
+                  <button id="cir-save" class="btn" type="button">Save</button>
+                  <button id="cir-cancel" class="btn" type="button">Cancel</button>
+                </div>
+              </div>
+              <div class="mapbox cir-mapbox">
+                <div id="cirmap" role="img" aria-label="The circuit's lines on a map"></div>
+                <div class="base" role="group" aria-label="Map type">
+                  <button data-base="street" type="button" aria-pressed="true">Street</button>
+                  <button data-base="sat" type="button" aria-pressed="false">Satellite</button>
+                </div>
+              </div>
+              <div id="cir-view">
+                <div id="cir-actions" class="cir-tools"></div>
+                <div id="cir-laps" class="cir-laps"></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </article>
       <article id="compare-view" hidden>
         <header class="head">
@@ -164,18 +271,39 @@
             <button id="compare" class="btn" type="button" title="Put another trip beside this one: the figures, and who was ahead along the way" hidden>Compare</button>
             <a id="export-gpx" class="btn" download title="A GPX track: opens in most GPS and mapping programs">GPX</a>
             <a id="export-kml" class="btn" download title="A KML track: opens in Google Earth, no account or key needed">KML</a>
+            <a id="export-csv" class="btn" download title="One row for each recorded point (about one a second), in metres and seconds, for a spreadsheet">CSV</a>
             <a id="export-share" class="btn" download title="One web page with this trip's route, figures and replay that anyone can open, with nothing to install. It contains the trip's positions." hidden>Share</a>
           </div>
           <div id="actions" class="actions" hidden>
             <button id="join-prev" class="btn" type="button" hidden>Join with previous</button>
             <button id="join-next" class="btn" type="button" hidden>Join with next</button>
             <button id="cut" class="btn" type="button" title="Cut this trip in two at the replay position">Cut here</button>
+            <button id="make-circuit" class="btn" type="button" title="Draw a lap-timing circuit on this trip's route">Make a circuit</button>
             <button id="star" class="btn" type="button" aria-pressed="false" title="Mark this trip as a favourite, so it is easy to find">&#x2606; Star</button>
             <button id="rename" class="btn" type="button">Rename</button>
             <button id="delete" class="btn danger" type="button">Delete</button>
           </div>
         </header>
         <p id="edit-note" class="edit-note" role="status" hidden></p>
+        <section id="tag-row" class="tag-row" aria-label="Tags" hidden>
+          <ul id="tag-chips" class="tag-chips"></ul>
+          <form id="tag-form" class="tag-form" autocomplete="off" hidden>
+            <input id="tag-input" type="text" maxlength="24" placeholder="New tag" aria-label="A new tag for this trip" spellcheck="false">
+            <button class="btn small" type="submit">Add</button>
+          </form>
+          <p id="tag-note" class="muted tag-note" role="status" hidden></p>
+        </section>
+        <details id="price-box" class="price-box" hidden>
+          <summary id="price-summary">Fuel price for this trip</summary>
+          <div class="price-fields">
+            <label>Per litre <input id="tp-liquid" type="number" min="0" max="1000" step="0.001" aria-label="Price of a litre for this trip, 0 for none"></label>
+            <label>Per kWh <input id="tp-electric" type="number" min="0" max="1000" step="0.001" aria-label="Price of a kilowatt hour for this trip, 0 for none"></label>
+            <label>Currency <input id="tp-currency" type="text" maxlength="4" size="4" aria-label="Currency symbol or code"></label>
+            <button id="tp-save" class="btn small" type="button">Save</button>
+            <button id="tp-remove" class="btn small" type="button">No price</button>
+          </div>
+          <p id="tp-note" class="muted tag-note" role="status" hidden></p>
+        </details>
         <div id="mapbox" class="mapbox">
           <div id="map" role="img" aria-label="Map of the trip"></div>
           <div class="rot-ui rot-zoom" role="group" aria-label="Zoom">
@@ -190,6 +318,7 @@
           <div id="legend" class="legend" aria-hidden="true"></div>
           <button id="recentre" class="recentre" type="button" title="Centre the map on the car and follow it" hidden>Re-centre on the car</button>
           <div id="limit-sign" class="limit-sign" role="img" hidden><span></span></div>
+          <div id="route-chip" class="route-chip" hidden></div>
           <div class="sizer" role="group" aria-label="Map size">
             <button id="map-smaller" type="button" aria-label="Smaller map" title="Smaller map">&minus;</button>
             <button id="map-bigger" type="button" aria-label="Bigger map" title="Bigger map">+</button>

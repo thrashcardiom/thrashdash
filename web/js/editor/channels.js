@@ -77,6 +77,37 @@ const TRIP_FIELD = {
   consumption: ["consumption (L or kWh per 100 km)", null], range: ["range left", "distance"],
 };
 
+// ---- what the game knows about the world (kept by the relay from BeamNG.Earth): the speed limit and the route ------------------
+const GEO = {
+  "geo.limit": ["Speed limit here", "speed"],
+  "geo.limitPosted": ["Speed limit is from a real sign (not a guess)", null],
+  "geo.route.active": ["A route is set", null],
+  "geo.route.remaining": ["Route: distance left", "distance"],
+  "geo.route.eta": ["Route: time left (seconds)", null],
+  "geo.route.off": ["Route: distance off the route", "distance"],
+  "geo.route.name": ["Route: destination", null],
+  "geo.route.planning": ["Route: being planned", null],
+  "geo.route.replanning": ["Route: re-routing", null],
+};
+
+// ---- lap timing (kept by the relay, from the car's position and the circuits drawn on the Trips page) --------------------------
+const LAP = {
+  "lap.active": "Lap timing: a lap is being timed",
+  "lap.circuit": "Lap timing: circuit name",
+  "lap.number": "Lap timing: lap number",
+  "lap.time": "Lap timing: this lap so far (seconds)",
+  "lap.delta": "Lap timing: gap to your best lap so far (seconds, + is behind)",
+  "lap.sector": "Lap timing: the sector you are in",
+  "lap.sectors": "Lap timing: how many sectors the circuit has",
+  "lap.best": "Lap timing: best lap in this vehicle (seconds)",
+  "lap.last": "Lap timing: last lap (seconds)",
+  "lap.lastValid": "Lap timing: the last lap counts (no sector line was missed)",
+  "lap.lastDelta": "Lap timing: last lap against the best before it (seconds)",
+  "lap.lastIsBest": "Lap timing: the last lap was a new best",
+};
+const LAP_SECTOR = /^lap\.s([1-9])\.(last|best|isBest)$/;
+const LAP_SECTOR_FIELD = { last: "last lap's time (seconds)", best: "best time (seconds)", isBest: "the last lap's was a new best" };
+
 /** "oilOverheating" -> "oil overheating", "brakeFL" -> "brake FL": split camelCase, keep short capital runs (wheel names). */
 export function humanize(name) {
   return name
@@ -96,6 +127,9 @@ export function describeChannel(name) {
   if ((m = ZONE.exec(name))) return `Body damage: ${ZONE_NAME[m[1]]}`;
   if (Object.hasOwn(DAMAGE_NAME, name)) return DAMAGE_NAME[name];
   if ((m = TRIP.exec(name))) return `Trip ${m[1]}: ${TRIP_FIELD[m[2]][0]}`;
+  if (Object.hasOwn(GEO, name)) return GEO[name][0];
+  if (Object.hasOwn(LAP, name)) return LAP[name];
+  if ((m = LAP_SECTOR.exec(name))) return `Lap timing: sector ${m[1]} ${LAP_SECTOR_FIELD[m[2]]}`;
   if (name === "trip.energyKind") return "Trip: kind of energy (liquid, electric, mixed)";
   if (name === "energy.electric") return "Car has a battery";
   if (name === "energy.liquid") return "Car has a fuel tank";
@@ -111,16 +145,19 @@ export function suggestKind(name) {
   if ((m = TIRE.exec(name))) return m[2] === "temp" || m[2] === "coreTemp" ? "temp" : m[2] === "pressure" ? "pressure" : "none";
   if (ZONE.test(name)) return "fraction";
   if ((m = TRIP.exec(name))) return TRIP_FIELD[m[2]][1];
+  if (Object.hasOwn(GEO, name)) return GEO[name][1];
   return null;
 }
 
-/** "common" (curated), "tires", "damage", "states" (component states), "trip", "car" (everything else) or "minor" (probably noise). */
+/** "common" (curated), "tires", "damage", "states" (component states), "trip", "geo" (the road and the route), "lap" (lap timing), "car" (everything else) or "minor" (probably noise). */
 export function classifyChannel(name) {
   if (Object.hasOwn(KNOWN, name)) return "common";
   if (name.startsWith("tire.")) return "tires";
   if (name.startsWith("damage.")) return "damage";
   if (name.startsWith("state.")) return "states";
   if (name.startsWith("trip.")) return "trip";
+  if (name.startsWith("geo.")) return "geo";
+  if (name.startsWith("lap.")) return "lap";
   if (name.startsWith("energy.")) return "minor";
   if (WHEEL_THERMAL.test(name)) return "car";
   return MINOR.test(name) ? "minor" : "car";
@@ -129,11 +166,11 @@ export function classifyChannel(name) {
 /**
  * Split a catalog ({name: type}) into picker groups, each sorted by what the user would search for:
  * friendly label if there is one, otherwise the raw name. Case-insensitive search matches either.
- * @returns {{common: object[], tires: object[], damage: object[], states: object[], trip: object[], car: object[], minor: object[]}} entries are {name, label, type}
+ * @returns {{common: object[], tires: object[], damage: object[], states: object[], trip: object[], geo: object[], lap: object[], car: object[], minor: object[]}} entries are {name, label, type}
  */
 export function groupChannels(channels, query = "") {
   const q = query.trim().toLowerCase();
-  const groups = { common: [], tires: [], damage: [], states: [], trip: [], car: [], minor: [] };
+  const groups = { common: [], tires: [], damage: [], states: [], trip: [], geo: [], lap: [], car: [], minor: [] };
   for (const [name, type] of Object.entries(channels)) {
     const label = describeChannel(name);
     if (q && !name.toLowerCase().includes(q) && !(label && label.toLowerCase().includes(q))) continue;

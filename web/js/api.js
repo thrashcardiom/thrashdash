@@ -51,6 +51,21 @@ export const api = {
   /** A popup now, to the game and the dashboard windows: {ok, game}. */
   testPopup: () => call("POST", "/api/triplog/test-popup", {}),
   listRoutes: () => call("GET", "/api/triplog/routes"),
+  /** The GPS route now: {active, name, remaining, eta, off, version, points, dest, waypoints, game}. */
+  getRoute: () => call("GET", "/api/route"),
+  /** Ask the game to set the route through these stops ([{lat, lon, name?}], the last the destination). Rejects with the game's reason. */
+  setRoute: (stops) => call("POST", "/api/route", { stops }),
+  clearRoute: () => call("DELETE", "/api/route"),
+  listDestinations: () => call("GET", "/api/destinations"),
+  saveDestination: (name, lat, lon) => call("POST", "/api/destinations", { name, lat, lon }),
+  deleteDestination: (id) => call("DELETE", `/api/destinations/${encodeURIComponent(id)}`),
+  /** Lap timing circuits: the lines, how many laps each has had, and each vehicle's best. */
+  listCircuits: () => call("GET", "/api/circuits"),
+  createCircuit: (circuit) => call("POST", "/api/circuits", circuit),
+  saveCircuit: (id, circuit) => call("PUT", `/api/circuits/${encodeURIComponent(id)}`, circuit),
+  deleteCircuit: (id) => call("DELETE", `/api/circuits/${encodeURIComponent(id)}`),
+  circuitLaps: (id) => call("GET", `/api/circuits/${encodeURIComponent(id)}/laps`),
+  clearCircuitLaps: (id) => call("DELETE", `/api/circuits/${encodeURIComponent(id)}/laps`),
   /** What a trip has gained since `after` seconds into it: {points, info, events, end} (for following a trip being driven). */
   liveTrip: (id, after) => call("GET", `/api/triplog/${encodeURIComponent(id)}/live?after=${encodeURIComponent(after)}`),
   getTrip: (id) => call("GET", `/api/triplog/${encodeURIComponent(id)}`),
@@ -58,6 +73,10 @@ export const api = {
   /** What the "start BeamNG.Earth" setting would start (the given text, or the saved setting): {configured, chosen, message, running}. */
   earthInfo: (path) => call("GET", `/api/earth${path === undefined ? "" : `?path=${encodeURIComponent(path)}`}`),
   noteWaypoint: (id, t, text) => call("PATCH", `/api/triplog/${encodeURIComponent(id)}`, { note: { t, text } }),
+  /** Set the fuel price a trip is costed at ({liquid, electric, currency}); null takes it away. */
+  priceTrip: (id, price) => call("PATCH", `/api/triplog/${encodeURIComponent(id)}`, { price }),
+  /** Set a trip's tags (the whole list). */
+  tagTrip: (id, tags) => call("PATCH", `/api/triplog/${encodeURIComponent(id)}`, { tags }),
   starTrip: (id, starred) => call("PATCH", `/api/triplog/${encodeURIComponent(id)}`, { starred }),
   /** Make one trip of two (the earlier first), cut a trip in two `at` seconds into it, and back up and restore every trip. */
   joinOptions: (id) => call("GET", `/api/triplog/${encodeURIComponent(id)}/joins`),

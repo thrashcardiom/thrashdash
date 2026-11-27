@@ -14,7 +14,7 @@ import zipfile
 from datetime import datetime, timezone
 
 from . import tripstats
-from .triplog import TRASH_DIR, TRIP_ID_RE, Busy, NotFound, _MAX_READ_BYTES, haversine_m
+from .triplog import TRASH_DIR, TRIP_ID_RE, Busy, NotFound, _MAX_READ_BYTES, haversine_m, stored_price, stored_tags
 
 JOIN_MAX_GAP_M = 500.0  # two trips this far apart (end of the first to start of the second) are not one drive with a stop in the middle
 JOIN_MAX_GAP_S = 3600.0  # ...and neither are two this far apart in time (a stop longer than an hour is not a stop in a drive)
@@ -58,7 +58,7 @@ def _in_time_order(rows):
     return sorted(rows, key=lambda r: (r.get("t", 0), rank.get(r.get("k"), 3)))
 
 
-def _write_trip(log, header, body, end, title=None, starred=False, notes=()):
+def _write_trip(log, header, body, end, title=None, starred=False, notes=(), tags=(), price=None):
     """Write a new trip file: `header`, the body lines, the closing line (with its summary worked out now) and a name and star if given.
     Returns the id. The file is written whole in one go, to a name that is free."""
     trip_id = header["id"]
@@ -73,6 +73,10 @@ def _write_trip(log, header, body, end, title=None, starred=False, notes=()):
         lines.append({"k": "name", "name": title})
     if starred:
         lines.append({"k": "star", "v": True})
+    if tags:
+        lines.append({"k": "tags", "v": list(tags)})
+    if price:
+        lines.append({"k": "price", "v": price})  # (a line, so it beats whatever price the header carried over)
     lines.extend({"k": "note", "t": n["t"], "text": n["text"]} for n in notes)
     with open(path, "x", encoding="utf-8", newline="\n") as f:  # ("x": never over a file that is there)
         f.write("\n".join(_dump(line) for line in lines) + "\n")
@@ -211,7 +215,9 @@ def join(log, first_id, second_id, force=False):
     _to_trash(log, first_id)
     _to_trash(log, second_id)
     try:
-        return _write_trip(log, dict(ha), body, end, title or b.get("title"), starred or bool(b.get("starred")), notes)
+        tags = stored_tags([*a.get("tags", []), *b.get("tags", [])])  # (both drives' tags, the first's first; at most as many as one trip may have)
+        price = a.get("price") or b.get("price")  # (one drive, one price: the first's, or the second's if the first had none)
+        return _write_trip(log, dict(ha), body, end, title or b.get("title"), starred or bool(b.get("starred")), notes, tags, price)
     except Exception:
         # (nothing is lost: put the originals back rather than leave the drive in the trash)
         for tid in (first_id, second_id):
@@ -273,8 +279,10 @@ def cut(log, trip_id, at_s):
     second_notes = [{"t": round(n["t"] - t0, 2), "text": n["text"]} for n in data.get("notes", []) if n["t"] >= t0]
     _to_trash(log, trip_id)
     try:
-        first = _write_trip(log, dict(header), first_body, first_end, title, starred, first_notes)
-        second = _write_trip(log, header2, second_body, second_end, notes=second_notes)
+        tags = data.get("tags", [])  # (both halves of a drive are still that kind of drive)
+        price = data.get("price")
+        first = _write_trip(log, dict(header), first_body, first_end, title, starred, first_notes, tags, price)
+        second = _write_trip(log, header2, second_body, second_end, notes=second_notes, tags=tags, price=price)
     except Exception:
         for name in (trip_id, header2["id"]):
             try:

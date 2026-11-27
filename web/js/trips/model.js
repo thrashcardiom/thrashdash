@@ -158,6 +158,37 @@ export function speedText(ms, prefs) {
 
 const sentence = (parts) => parts.filter(Boolean).join(", ");
 
+// ---- what a drive cost ------------------------------------------------------------------------------------------------------------
+// The price of fuel is saved WITH each trip (the relay copies the setting into the trip as it starts, and a trip's price can be changed
+// by hand), so a later change of price never changes what an old drive cost. A trip with no price has no cost: nothing is guessed.
+
+/** 12.5 + "$" -> "$12.50"; 12.5 + "EUR" -> "12.50 EUR"; no currency -> "12.50". A symbol goes in front, a code (letters) after. */
+export function moneyText(amount, currency = "") {
+  const n = (Math.round(amount * 100) / 100).toFixed(2);
+  if (!currency) return n;
+  return /^[A-Za-z]{2,}$/.test(currency) ? `${n} ${currency}` : `${currency}${n}`;
+}
+
+/**
+ * What a trip's fuel (or charge) cost: {amount, currency, rate (price per litre or kWh), unit}, or null when it has no price for the
+ * energy it used, or no fuel reading. `trip` is a list item or an open trip: it has `price` and `stats.fuel`.
+ */
+export function tripCost(trip) {
+  const price = trip?.price;
+  const fuel = trip?.stats?.fuel;
+  if (!price || !fuel || !(fuel.used > 0)) return null;
+  const rate = fuel.unit === "kWh" ? price.electric : fuel.unit === "L" ? price.liquid : 0;
+  if (!(rate > 0)) return null;
+  return { amount: fuel.used * rate, currency: price.currency ?? "", rate, unit: fuel.unit };
+}
+
+/** The cost over 100 km (100 miles when the person's distance unit is miles) of a trip that went `dist` metres: {amount, per} or null for a very short one. */
+export function costPer100(cost, dist, prefs) {
+  if (!cost || !(dist >= 500)) return null;
+  const miles = prefs?.distance === "mi";
+  return { amount: cost.amount / (dist / (miles ? 160934.4 : 100000)), per: miles ? "100 mi" : "100 km" };
+}
+
 /**
  * The figures shown for a trip, as tiles: [{key, label, value, sub, tone}]. A tile is left out when the trip has nothing for
  * it (no fuel readings, no posted speed limit). `tone` is "warn" for time spent over the limit.
@@ -182,6 +213,11 @@ export function statTiles(trip, prefs, rule) {
     const used = formatEnergy(s.fuel.used, kind, economy);
     const per = formatConsumption(s.fuel.per_100km, kind, economy);
     if (used) add("fuel", kind === "electric" ? "Energy used" : "Fuel used", `${used.value.toFixed(used.value >= 10 ? 1 : 2)} ${used.unit}`, per ? `${per.value.toFixed(1)} ${per.unit}` : "");
+    const cost = tripCost(trip);
+    if (cost) {
+      const per100 = costPer100(cost, s.dist, prefs);
+      add("cost", kind === "electric" ? "Energy cost" : "Fuel cost", moneyText(cost.amount, cost.currency), per100 ? `${moneyText(per100.amount, cost.currency)} per ${per100.per}` : "");
+    }
   }
 
   if (s.alt && (s.alt.gain || s.alt.loss)) {
@@ -350,6 +386,57 @@ export function filterTrips(trips, query, text) {
   });
 }
 
+// ---- tags -------------------------------------------------------------------------------------------------------------------
+// Short labels on a trip (commute, track...). A fixed set is offered to begin with (the relay's, sent with the trip list: this is only the
+// fallback for a page that has not heard it), and anyone may add their own, which are then offered too. The rules here are the relay's
+// (triplog.clean_tags): it has the last word, but a page that follows them rarely hears "no".
+
+export const DEFAULT_PRESET_TAGS = ["Commute", "Tour", "Track", "Off-road", "Test", "Event"];
+export const MAX_TAGS = 8;
+export const MAX_TAG_CHARS = 24;
+
+const sameTag = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+
+/** What was typed as a tag, tidied: one line, no control characters, at most MAX_TAG_CHARS, and spelled the way a tag already known is
+ * (typing "commute" gives "Commute"). "" if nothing is left. */
+export function cleanTag(text, known = []) {
+  const tidy = String(text ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_TAG_CHARS).trim();
+  return known.find((k) => sameTag(k, tidy)) ?? tidy;
+}
+
+/** Whether a trip (or route) has this tag; an empty tag means "any". */
+export const hasTag = (item, tag) => !tag || (item.tags ?? []).some((t) => sameTag(t, tag));
+
+/** The tags with `tag` added if it is not there, taken away if it is. */
+export function toggleTag(tags, tag) {
+  return tags.some((t) => sameTag(t, tag)) ? tags.filter((t) => !sameTag(t, tag)) : [...tags, tag];
+}
+
+/** Adding a tag somebody typed. @returns {{tags: string[], tag: string, error: string}} `error` is a sentence when it cannot be added. */
+export function addTypedTag(tags, text, known = []) {
+  const tag = cleanTag(text, known);
+  if (!tag) return { tags, tag: "", error: "Type a tag first." };
+  if (tags.some((t) => sameTag(t, tag))) return { tags, tag, error: `This trip already has the tag ${tag}.` };
+  if (tags.length >= MAX_TAGS) return { tags, tag, error: `A trip can have ${MAX_TAGS} tags: take one away first.` };
+  return { tags: [...tags, tag], tag, error: "" };
+}
+
+/** Every tag the page offers: the fixed set, then each other one in use (on any trip, or this one), alphabetically. */
+export function knownTags(trips, presets = DEFAULT_PRESET_TAGS, extra = []) {
+  const out = [...presets];
+  const own = [];
+  for (const t of [...trips.flatMap((trip) => trip.tags ?? []), ...extra]) {
+    if (!out.some((o) => sameTag(o, t)) && !own.some((o) => sameTag(o, t))) own.push(t);
+  }
+  return [...out, ...own.sort((a, b) => a.localeCompare(b))];
+}
+
+/** The tags that occur on these trips (for a filter): the fixed set that is used, in its order, then the others alphabetically. */
+export function tagsInUse(trips, presets = DEFAULT_PRESET_TAGS) {
+  const used = new Set(trips.flatMap((t) => t.tags ?? []).map((t) => t.toLowerCase()));
+  return knownTags(trips, presets).filter((t) => used.has(t.toLowerCase()));
+}
+
 /** What the trips of the last `days` days add up to, for the line at the top of the list: {count, distance (m), duration (s)}.
  * A trip counts by when it began. Trips with no distance yet count as zero metres. */
 export function recentTotals(trips, nowMs = Date.now(), days = 7) {
@@ -427,12 +514,12 @@ export function clockText(t, duration) {
 
 export const WHEN_OPTIONS = [{ id: "all", label: "All time" }, { id: "7", label: "Last 7 days" }, { id: "30", label: "Last 30 days" }, { id: "year", label: "This year" }];
 
-/** The trips (routes from /api/triplog/routes) that pass the filters: {when, vehicle, country}. Empty strings and "all" mean no filter. */
-export function filterRoutes(routes, { when = "all", vehicle = "", country = "" } = {}, nowMs = Date.now()) {
+/** The trips (routes from /api/triplog/routes) that pass the filters: {when, vehicle, country, tag}. Empty strings and "all" mean no filter. */
+export function filterRoutes(routes, { when = "all", vehicle = "", country = "", tag = "" } = {}, nowMs = Date.now()) {
   let cutoff = -Infinity;
   if (when === "7" || when === "30") cutoff = nowMs / 1000 - Number(when) * 86400;
   else if (when === "year") cutoff = new Date(new Date(nowMs).getFullYear(), 0, 1).getTime() / 1000;
-  return routes.filter((r) => r.ts >= cutoff && (!vehicle || r.vehicle === vehicle) && (!country || (r.countries ?? []).includes(country)));
+  return routes.filter((r) => r.ts >= cutoff && (!vehicle || r.vehicle === vehicle) && (!country || (r.countries ?? []).includes(country)) && hasTag(r, tag));
 }
 
 /** What the vehicle and country pickers offer: every one that occurs, sorted. */
@@ -441,6 +528,7 @@ export function filterOptions(routes) {
   return {
     vehicles: sorted(new Set(routes.map((r) => r.vehicle).filter(Boolean))),
     countries: sorted(new Set(routes.flatMap((r) => r.countries ?? []).filter(Boolean))),
+    tags: tagsInUse(routes),
   };
 }
 
@@ -459,13 +547,14 @@ export function routeTotals(routes) {
 /**
  * What all the finished trips in the list add up to, for the Stats view. `trips` are list items ({id, ts, vehicle, title, stats});
  * one without a summary yet (still being recorded) is left out. Returns
- *   {trips, dist (m), dur (s), moving (s), days, countries[], towns, fuel: {L, kWh},
+ *   {trips, dist (m), dur (s), moving (s), days, countries[], towns, fuel: {L, kWh}, cost: {byCurrency: [{currency, amount, dist, trips}], priced, fuelTrips},
  *    records: {longest, longestTime, top, highest, climb, countries}  each {value, id, trip} or null,
  *    vehicles: [{vehicle, trips, dist, dur, used, unit, per100}], months: [{key "2026-11", dist, trips}] oldest first}.
  */
 export function lifetimeStats(trips, rule) {
   const done = trips.filter((t) => t.stats);
-  const out = { trips: done.length, impacts: 0, dist: 0, dur: 0, moving: 0, days: 0, countries: [], towns: 0, fuel: {}, records: {}, vehicles: [], months: [] };
+  const out = { trips: done.length, impacts: 0, dist: 0, dur: 0, moving: 0, days: 0, countries: [], towns: 0, fuel: {}, cost: { byCurrency: [], priced: 0, fuelTrips: 0 }, records: {}, vehicles: [], months: [] };
+  const spent = new Map();
   const days = new Set(), countries = new Set(), towns = new Set(), months = new Map(), vehicles = new Map();
   const best = (name, value, trip) => {
     if (!(value > 0)) return;
@@ -503,9 +592,20 @@ export function lifetimeStats(trips, rule) {
       v.usedDist += s.dist;
       v.unit = s.fuel.unit;
       out.fuel[s.fuel.unit] = (out.fuel[s.fuel.unit] || 0) + s.fuel.used;
+      out.cost.fuelTrips += 1; // (the same trips as the fuel above: a short one's reading is too noisy)
+      const cost = tripCost(t);
+      if (cost) {
+        out.cost.priced += 1;
+        const c = spent.get(cost.currency) ?? { currency: cost.currency, amount: 0, dist: 0, trips: 0 };
+        c.amount += cost.amount;
+        c.dist += s.dist;
+        c.trips += 1;
+        spent.set(cost.currency, c);
+      }
     }
     vehicles.set(key, v);
   }
+  out.cost.byCurrency = [...spent.values()].sort((a, b) => b.amount - a.amount);
   out.days = days.size;
   out.countries = [...countries].sort((a, b) => a.localeCompare(b));
   out.towns = towns.size;

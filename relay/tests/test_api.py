@@ -178,7 +178,7 @@ class SettingsStoreTests(unittest.TestCase):
             path = Path(d) / "settings.json"
             store = SettingsStore(path)
             self.assertEqual(store.get(), {"units": {"speed": "kmh", "temp": "c", "distance": "km", "pressure": "psi", "economy": "auto"}, "defaultLayout": "default", "skins": {}, "vehicleDashboards": {}, "autoSwitch": True, "lan": False, "alerts": {"enabled": True, "off": []},
-                                         "tripNotices": {"game": True, "gameStart": False, "window": True}, "tripIdleEndMin": 2, "restoreWindows": True, "exactWindowPlacement": False, "closeWindowsOnExit": True, "earthPath": "", "impactRule": {"damage": 1.0, "g": 4.0}})
+                                         "tripNotices": {"game": True, "gameStart": False, "window": True}, "tripIdleEndMin": 2, "restoreWindows": True, "exactWindowPlacement": False, "closeWindowsOnExit": True, "earthPath": "", "impactRule": {"damage": 1.0, "g": 4.0}, "fuelPrice": {"liquid": 0.0, "electric": 0.0, "currency": ""}})
             store.update({"units": {"speed": "mph"}})
             self.assertEqual(SettingsStore(path).get()["units"], {"speed": "mph", "temp": "c", "distance": "km", "pressure": "psi", "economy": "auto"})  # partial update keeps the rest
             path.write_text("garbage{")
@@ -347,8 +347,9 @@ class SkinSettingTests(unittest.TestCase):
     def test_alert_settings(self):
         self.assertEqual(validate_settings({"alerts": {"enabled": False, "off": ["fuel", "fuel", "overRev"]}})["alerts"], {"enabled": False, "off": ["fuel", "overRev"]})
         self.assertEqual(validate_settings({"alerts": {}})["alerts"], {})
+        self.assertEqual(validate_settings({"alerts": {"on": ["offRoute", "offRoute"]}})["alerts"], {"on": ["offRoute"]})
         for bad in ({"alerts": []}, {"alerts": {"enabled": "yes"}}, {"alerts": {"off": "fuel"}}, {"alerts": {"off": [5]}},
-                    {"alerts": {"off": ["../x"]}}, {"alerts": {"off": ["a" + str(i) for i in range(41)]}}):
+                    {"alerts": {"off": ["../x"]}}, {"alerts": {"off": ["a" + str(i) for i in range(41)]}}, {"alerts": {"on": "offRoute"}}, {"alerts": {"on": [5]}}, {"alerts": {"on": ["../x"]}}):
             with self.assertRaises(ValidationError, msg=repr(bad)[:60]):
                 validate_settings(bad)
         with tempfile.TemporaryDirectory() as d:
@@ -359,6 +360,22 @@ class SkinSettingTests(unittest.TestCase):
             self.assertEqual(SettingsStore(Path(d) / "settings.json").get()["alerts"], {"enabled": False, "off": ["fuel"]})
             store.update({"units": {"speed": "mph"}})  # unrelated updates leave alerts alone
             self.assertEqual(store.get()["alerts"], {"enabled": False, "off": ["fuel"]})
+            store.update({"alerts": {"on": ["offRoute"]}})  # an alert that is off unless asked for is remembered too
+            self.assertEqual(SettingsStore(Path(d) / "settings.json").get()["alerts"], {"enabled": False, "off": ["fuel"], "on": ["offRoute"]})
+
+    def test_alert_limit_margin_setting(self):
+        self.assertEqual(validate_settings({"alerts": {"limitMargin": 1.5}})["alerts"], {"limitMargin": 1.5})
+        self.assertEqual(validate_settings({"alerts": {"limitMargin": 0}})["alerts"], {"limitMargin": 0.0})  # 0 = any excess
+        self.assertEqual(validate_settings({"alerts": {"limitMargin": 14}})["alerts"], {"limitMargin": 14.0})
+        for bad in (-0.1, 14.1, float("nan"), float("inf"), "5", True, None, [1]):
+            with self.assertRaises(ValidationError, msg=repr(bad)):
+                validate_settings({"alerts": {"limitMargin": bad}})
+        with tempfile.TemporaryDirectory() as d:
+            store = SettingsStore(Path(d) / "settings.json")
+            store.update({"alerts": {"off": ["overLimit"]}})
+            store.update({"alerts": {"limitMargin": 2.0}})  # the margin and the switches are saved independently
+            saved = SettingsStore(Path(d) / "settings.json").get()["alerts"]
+            self.assertEqual((saved["off"], saved["limitMargin"]), (["overLimit"], 2.0))
 
     def test_store_merges_and_clean_removes_the_entry(self):
         with tempfile.TemporaryDirectory() as d:
@@ -430,3 +447,39 @@ class EarthSettingTests(unittest.TestCase):
             for bad in (5, None, ["x"], "a\nb", "x" * 501):
                 with self.assertRaises(ValidationError, msg=repr(bad)):
                     store.update({"earthPath": bad})
+
+
+class ThemeValidationTests(unittest.TestCase):
+    """A dashboard's theme (colours for the flat look) is saved in the layout: only plain #rrggbb colours of known names may be."""
+
+    @staticmethod
+    def layout(**extra):
+        return {"format": 1, "name": "T", "width": 800, "height": 300, "widgets": [], **extra}
+
+    def test_a_theme_is_kept_with_its_colours_in_lower_case(self):
+        out = validate_layout(self.layout(theme={"bg": "#0B0E13", "accent": "#35c2ff"}))
+        self.assertEqual(out["theme"], {"bg": "#0b0e13", "accent": "#35c2ff"})
+
+    def test_no_theme_or_an_empty_one_leaves_none(self):
+        self.assertNotIn("theme", validate_layout(self.layout()))
+        self.assertNotIn("theme", validate_layout(self.layout(theme={})))
+        self.assertNotIn("theme", validate_layout(self.layout(theme={"unknown": "#ffffff"})))  # (an unknown colour is dropped, and nothing is left)
+
+    def test_an_unknown_colour_name_is_dropped_and_the_rest_kept(self):
+        self.assertEqual(validate_layout(self.layout(theme={"bg": "#111111", "sparkle": "#ffffff"}))["theme"], {"bg": "#111111"})
+
+    def test_a_colour_that_is_not_a_plain_hex_colour_is_refused(self):
+        for bad in ("red", "#fff", "#12345g", "#1234567", "rgb(1,2,3)", "url(//x)", "#ffffff; background: url(//x)", "", None, 5, ["#ffffff"]):
+            with self.assertRaises(ValidationError, msg=repr(bad)):
+                validate_layout(self.layout(theme={"bg": bad}))
+
+    def test_a_theme_that_is_not_an_object_is_refused(self):
+        for bad in ("#ffffff", 5, ["bg"], None):
+            with self.assertRaises(ValidationError, msg=repr(bad)):
+                validate_layout(self.layout(theme=bad))
+
+    def test_a_theme_comes_back_from_the_store(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = LayoutStore(Path(d) / "layouts", web_root() / "layouts")
+            lid = store.create(self.layout(theme={"panel": "#202020"}))
+            self.assertEqual(store.get(lid)[0]["theme"], {"panel": "#202020"})

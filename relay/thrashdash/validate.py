@@ -34,12 +34,18 @@ UNIT_CHOICES = {"speed": {"kmh", "mph"}, "temp": {"c", "f"}, "distance": {"km", 
                 "economy": {"auto", "l100", "kmpl", "mpgus", "mpguk"}}
 LAYOUT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 SCALE_MODES = {"fit", "max", "fixed"}
+# The colours a dashboard's theme may set (web/js/theme.js has the same list: keep them in step), each a plain "#rrggbb".
+THEME_KEYS = ("bg", "panel", "text", "muted", "accent", "warn", "crit")
+THEME_COLOUR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 MAX_SKIN_ENTRIES = 200
 MAX_VEHICLE_RULES = 100
 # Alerts the user switched off (their ids are defined in web/js/alerts.js; only the shape is checked here, so adding an
 # alert never means touching Python).
 TRIP_IDLE_CHOICES = (1, 2, 5, 10, 30)  # minutes a car may be parked before a trip ends
 MAX_ALERTS_OFF = 40
+FUEL_PRICE_MAX = 1000.0  # per litre or per kWh, in whatever currency: well beyond any real price, so a slipped key is refused
+CURRENCY_MAX = 4  # characters: a symbol or a code ("$", "NZ$", "EUR")
+LIMIT_MARGIN_MAX = 14.0  # m/s (about 50 km/h): how far over the posted limit before the "over the limit" alert; 0 = any excess
 # A vehicle key is the model folder from the game ("/vehicles/etkc/" -> "etkc").
 VEHICLE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}$")
 # Must match SKIN_CHOICES in web/js/skins/themes.js ("clean" = the original flat widgets). Used by settings.skins.
@@ -141,8 +147,49 @@ def validate_layout(raw):
         out["scaleMode"] = raw["scaleMode"]
     if "scalePercent" in raw:
         out["scalePercent"] = _num(raw["scalePercent"], "scalePercent", 10, 400)
+    # The theme: colours for the flat look, saved in the dashboard. Only plain #rrggbb colours of known names: nothing else may reach a style.
+    if "theme" in raw:
+        theme = raw["theme"]
+        if not isinstance(theme, dict):
+            raise ValidationError("theme: must be an object")
+        clean_theme = {}
+        for key, value in theme.items():
+            if key not in THEME_KEYS:
+                continue  # (an unknown colour is dropped, like any unknown key)
+            if not isinstance(value, str) or not THEME_COLOUR_RE.match(value):
+                raise ValidationError(f"theme.{key}: must be a colour like #1a2b3c")
+            clean_theme[key] = value.lower()
+        if clean_theme:
+            out["theme"] = clean_theme
     # (A skin is NOT part of a layout: it is a display setting kept per dashboard in settings.skins. A "skin" key in a
     # layout file, e.g. from an earlier version, is simply ignored like any unknown key.)
+    return out
+
+
+def clean_fuel_price(raw, what="price", allow_partial=False):
+    """A fuel price: {"liquid": per litre, "electric": per kWh, "currency": symbol}. 0 means "no price" for that kind of energy. Raises
+    ValidationError. With `allow_partial`, keys not given are left out (a settings patch changes only what it names)."""
+    if not isinstance(raw, dict):
+        raise ValidationError(f"{what}: must be an object")
+    out = {}
+    for key in ("liquid", "electric"):
+        if key in raw:
+            v = raw[key]
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or not 0 <= v <= FUEL_PRICE_MAX:
+                raise ValidationError(f"{what}.{key}: must be a price from 0 to {FUEL_PRICE_MAX:g} (0 for none)")
+            out[key] = round(float(v), 4)
+        elif not allow_partial:
+            out[key] = 0.0
+    if "currency" in raw:
+        c = raw["currency"]
+        if not isinstance(c, str):
+            raise ValidationError(f"{what}.currency: must be text")
+        c = " ".join("".join(ch if ch.isprintable() else " " for ch in c).split())
+        if len(c) > CURRENCY_MAX:
+            raise ValidationError(f"{what}.currency: at most {CURRENCY_MAX} characters (a symbol or a code)")
+        out["currency"] = c
+    elif not allow_partial:
+        out["currency"] = ""
     return out
 
 
@@ -219,14 +266,20 @@ def validate_settings(raw):
             if not isinstance(alerts["enabled"], bool):
                 raise ValidationError("alerts.enabled: must be true or false")
             clean_alerts["enabled"] = alerts["enabled"]
-        if "off" in alerts:
-            off = alerts["off"]
-            if not isinstance(off, list) or len(off) > MAX_ALERTS_OFF:
-                raise ValidationError(f"alerts.off: must be a list of at most {MAX_ALERTS_OFF} alert ids")
-            for alert_id in off:
-                if not isinstance(alert_id, str) or not KEY_RE.match(alert_id):
-                    raise ValidationError(f"alerts.off: {alert_id!r} is not a valid alert id")
-            clean_alerts["off"] = sorted(set(off))
+        for key in ("off", "on"):  # alerts that are normally on, switched off; and ones that are normally off, switched on
+            if key in alerts:
+                ids = alerts[key]
+                if not isinstance(ids, list) or len(ids) > MAX_ALERTS_OFF:
+                    raise ValidationError(f"alerts.{key}: must be a list of at most {MAX_ALERTS_OFF} alert ids")
+                for alert_id in ids:
+                    if not isinstance(alert_id, str) or not KEY_RE.match(alert_id):
+                        raise ValidationError(f"alerts.{key}: {alert_id!r} is not a valid alert id")
+                clean_alerts[key] = sorted(set(ids))
+        if "limitMargin" in alerts:
+            m = alerts["limitMargin"]
+            if isinstance(m, bool) or not isinstance(m, (int, float)) or m != m or not 0 <= m <= LIMIT_MARGIN_MAX:
+                raise ValidationError(f"alerts.limitMargin: must be a number of metres per second from 0 to {LIMIT_MARGIN_MAX:g}")
+            clean_alerts["limitMargin"] = float(m)
         clean["alerts"] = clean_alerts
     rule = raw.get("impactRule")
     if rule is not None:
@@ -240,6 +293,9 @@ def validate_settings(raw):
                     raise ValidationError(f"impactRule.{key}: must be a number from {low:g} to {high:g}" + (" (or 0 for off)" if allow_zero else ""))
                 clean_rule[key] = float(v)
         clean["impactRule"] = clean_rule
+    price = raw.get("fuelPrice")
+    if price is not None:
+        clean["fuelPrice"] = clean_fuel_price(price, "fuelPrice", allow_partial=True)
     idle = raw.get("tripIdleEndMin")
     if idle is not None:
         if isinstance(idle, bool) or idle not in TRIP_IDLE_CHOICES:

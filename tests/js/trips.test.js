@@ -231,7 +231,7 @@ test("the pickers offer what occurs, sorted, and nothing that is missing", () =>
   const o = filterOptions([route("a", 1, { vehicle: "pickup" }), route("b", 2), route("c", 3, { vehicle: null, countries: ["Australia", "New Zealand"] }), route("d", 4, { countries: undefined })]);
   assert.deepEqual(o.vehicles, ["etkc", "pickup"]);
   assert.deepEqual(o.countries, ["Australia", "New Zealand"]);
-  assert.deepEqual(filterOptions([]), { vehicles: [], countries: [] });
+  assert.deepEqual(filterOptions([]), { vehicles: [], countries: [], tags: [] });
 });
 
 test("totals over the trips shown", () => {
@@ -499,4 +499,62 @@ test("impactDetails says when, how fast, how hard and where, for the marker's ho
   assert.equal(lines[2], "8.3 g, +3.1% of the body");
   assert.equal(lines[3], "Remutaka Hill");
   assert.deepEqual(impactDetails({ t: 5, rise: 0, g: 5 }, [], prefs), ["Impact", "0:00:05 into the trip", "5.0 g"], "no route, no place: only what is known");
+});
+
+// ---- tags --------------------------------------------------------------------------------------------------------------------
+import { DEFAULT_PRESET_TAGS, MAX_TAGS, MAX_TAG_CHARS, addTypedTag, cleanTag, hasTag, knownTags, tagsInUse, toggleTag } from "../../web/js/trips/model.js";
+
+test("a typed tag is tidied and spelled the way a known tag is", () => {
+  assert.equal(cleanTag("  Hill \n climb  "), "Hill climb");
+  assert.equal(cleanTag("commute", DEFAULT_PRESET_TAGS), "Commute");
+  assert.equal(cleanTag("OFF-ROAD", DEFAULT_PRESET_TAGS), "Off-road");
+  assert.equal(cleanTag("a\u0000b"), "a b");
+  assert.equal(cleanTag("x".repeat(100)).length, MAX_TAG_CHARS);
+  assert.equal(cleanTag("   "), "");
+  assert.equal(cleanTag(undefined), "");
+});
+
+test("tags switch on and off without regard to case", () => {
+  assert.deepEqual(toggleTag(["Track"], "Commute"), ["Track", "Commute"]);
+  assert.deepEqual(toggleTag(["Track", "Commute"], "track"), ["Commute"]);
+  assert.deepEqual(toggleTag([], "Test"), ["Test"]);
+});
+
+test("adding a tag that was typed says why when it cannot be added", () => {
+  assert.deepEqual(addTypedTag(["Track"], "Hill climb", DEFAULT_PRESET_TAGS), { tags: ["Track", "Hill climb"], tag: "Hill climb", error: "" });
+  assert.deepEqual(addTypedTag([], "event", DEFAULT_PRESET_TAGS).tags, ["Event"]);
+  assert.match(addTypedTag(["Track"], "track", DEFAULT_PRESET_TAGS).error, /already has the tag Track/);
+  assert.match(addTypedTag([], "   ").error, /Type a tag/);
+  const full = Array.from({ length: MAX_TAGS }, (_, i) => `t${i}`);
+  assert.match(addTypedTag(full, "more").error, /8 tags/);
+  assert.deepEqual(addTypedTag(full, "more").tags, full); // (unchanged)
+});
+
+test("the tags offered are the fixed set, then those in use, alphabetically, without repeats", () => {
+  const trips = [{ tags: ["Hill climb", "track"] }, { tags: ["Dad's car", "hill CLIMB"] }, {}];
+  assert.deepEqual(knownTags(trips), [...DEFAULT_PRESET_TAGS, "Dad's car", "Hill climb"]);
+  assert.deepEqual(knownTags([], ["A", "B"], ["Zed"]), ["A", "B", "Zed"]);
+  assert.deepEqual(knownTags(trips, DEFAULT_PRESET_TAGS, ["Brand new"]), [...DEFAULT_PRESET_TAGS, "Brand new", "Dad's car", "Hill climb"]);
+});
+
+test("a filter offers only the tags that are used, fixed set first", () => {
+  const trips = [{ tags: ["Track", "Zebra"] }, { tags: ["Commute", "apple"] }, { tags: [] }];
+  assert.deepEqual(tagsInUse(trips), ["Commute", "Track", "apple", "Zebra"]);
+  assert.deepEqual(tagsInUse([{}, { tags: [] }]), []);
+});
+
+test("trips and routes are found by tag, in any case, and an empty tag means all", () => {
+  assert.ok(hasTag({ tags: ["Track"] }, "track"));
+  assert.ok(!hasTag({ tags: ["Track"] }, "Tour"));
+  assert.ok(!hasTag({}, "Track"));
+  assert.ok(hasTag({}, ""));
+  assert.ok(hasTag({ tags: [] }, undefined));
+});
+
+test("the all-trips and stats filters take a tag too", () => {
+  const routes = [{ id: 1, ts: 5, vehicle: "a", tags: ["Track"] }, { id: 2, ts: 5, vehicle: "a", tags: ["Commute"] }, { id: 3, ts: 5, vehicle: "b" }];
+  assert.deepEqual(filterRoutes(routes, { tag: "track" }).map((r) => r.id), [1]);
+  assert.deepEqual(filterRoutes(routes, { tag: "" }).map((r) => r.id), [1, 2, 3]);
+  assert.deepEqual(filterRoutes(routes, { tag: "Track", vehicle: "b" }).map((r) => r.id), []);
+  assert.deepEqual(filterOptions(routes).tags, ["Commute", "Track"]);
 });

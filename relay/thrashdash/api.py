@@ -11,7 +11,7 @@ from .paths import web_root
 from .store import LayoutStore, NotFound, ReadOnly, SettingsStore
 from . import tripexport, tripshare
 from .configs import windows_differ
-from .triplog import Busy, NotFound as TripNotFound
+from .triplog import PRESET_TAGS, Busy, NotFound as TripNotFound
 from . import earthlaunch, tripedit
 from .tripedit import EditError
 from .validate import ValidationError
@@ -27,6 +27,10 @@ WINDOWS = web.AppKey("windows", object)  # the WindowRegistry (which dashboard w
 AUTH = web.AppKey("auth", object)  # the AuthStore: the PIN for devices on the network
 NOTICES = web.AppKey("notices", object)  # trip popups (tripnotice.TripNotices), or None
 TRIPLOG = web.AppKey("triplog", object)  # the TripLog (where the car has been), or None when this run keeps none
+ROUTE_PLANNER = web.AppKey("route_planner", object)  # the RoutePlanner (sets the GPS route in the game), or None
+DESTINATIONS = web.AppKey("destinations", object)  # the DestinationStore (saved destinations), or None
+CIRCUITS = web.AppKey("circuits", object)  # the CircuitStore (lap timing circuits), or None
+LAPS = web.AppKey("laps", object)  # the LapStore (finished laps and bests), or None
 HUB = web.AppKey("hub", object)  # the Hub (live data and the trip meters); defined here so both modules share one key
 
 # Browsers refuse to attach a custom header to a cross-origin request without a CORS preflight, and
@@ -258,9 +262,9 @@ async def list_triplog(request):
     """Every recorded trip (newest first) and whether one is being recorded now."""
     log = request.app[TRIPLOG]
     if log is None:
-        return web.json_response({"enabled": False, "status": {"recording": False}, "trips": []})
+        return web.json_response({"enabled": False, "status": {"recording": False}, "trips": [], "presetTags": list(PRESET_TAGS)})
     notices = request.app[NOTICES]
-    return web.json_response({"enabled": True, "status": log.status(), "trips": log.list(), "notices": dict(notices.stats) if notices is not None else {}})
+    return web.json_response({"enabled": True, "status": log.status(), "trips": log.list(), "presetTags": list(PRESET_TAGS), "notices": dict(notices.stats) if notices is not None else {}})
 
 
 async def quit_thrashdash(request):
@@ -364,7 +368,8 @@ async def get_triplog_trip(request):
     return web.json_response(trip)
 
 
-EXPORTS = {"gpx": ("application/gpx+xml", tripexport.to_gpx, "gpx"), "kml": ("application/vnd.google-earth.kml+xml", tripexport.to_kml, "kml")}
+EXPORTS = {"gpx": ("application/gpx+xml", tripexport.to_gpx, "gpx"), "kml": ("application/vnd.google-earth.kml+xml", tripexport.to_kml, "kml"),
+           "csv": ("text/csv", tripexport.to_csv, "csv")}
 
 
 async def live_triplog_trip(request):
@@ -409,20 +414,25 @@ async def export_triplog_trip(request):
 
 async def rename_triplog_trip(request):
     """Change an ended trip: {"name": "..."} gives it a name (an empty name takes it away), {"starred": true|false} marks it as a
-    favourite or not, {"note": {"t": seconds, "text": "..."}} writes a note against the waypoint at that time (an empty text takes it
-    away). Any of them."""
+    favourite or not, {"tags": ["Track", ...]} sets its tags (the whole list; an empty one takes them away), {"price": {"liquid": 2.45, "electric": 0.3, "currency": "$"}} sets
+    the fuel price it is costed at (null takes it away), {"note": {"t": seconds,
+    "text": "..."}} writes a note against the waypoint at that time (an empty text takes it away). Any of them."""
     log = request.app[TRIPLOG]
     body = await _body(request)
     if log is None or not isinstance(body, dict):
         return _error(404, "there is no such trip")
-    if "name" not in body and "starred" not in body and "note" not in body:
-        return _error(400, 'give a "name", "starred" or "note"')
+    if not any(k in body for k in ("name", "starred", "note", "tags", "price")):
+        return _error(400, 'give a "name", "starred", "tags", "price" or "note"')
     reply = {"ok": True}
     try:
         if "name" in body:
             reply["title"] = log.rename(request.match_info["id"], body.get("name"))
         if "starred" in body:
             reply["starred"] = log.star(request.match_info["id"], body.get("starred"))
+        if "tags" in body:
+            reply["tags"] = log.tag(request.match_info["id"], body.get("tags"))
+        if "price" in body:
+            reply["price"] = log.set_price(request.match_info["id"], body.get("price"))
         if "note" in body:
             note = body["note"] if isinstance(body["note"], dict) else {}
             reply["note"] = log.note(request.match_info["id"], note.get("t"), note.get("text"))
@@ -559,6 +569,144 @@ async def earth_info(request):
     return web.json_response(info)
 
 
+def _circuits(request):
+    store = request.app[CIRCUITS]
+    if store is None:
+        raise web.HTTPNotFound(text="lap timing is not available in this run")
+    return store
+
+
+def _circuit_summary(request, circuit):
+    """A circuit as the Trips page lists it: its lines, and what has been done on it (the number of laps and each vehicle's best)."""
+    laps = request.app[LAPS]
+    return {**circuit, "lapCount": len(laps.laps(circuit["id"], limit=10**6)) if laps else 0, "bests": laps.bests(circuit["id"]) if laps else {}}
+
+
+@_guard_store_errors
+async def list_circuits(request):
+    store = request.app[CIRCUITS]
+    if store is None:
+        return web.json_response({"enabled": False, "circuits": []})
+    return web.json_response({"enabled": True, "circuits": [_circuit_summary(request, c) for c in store.list()]})
+
+
+@_guard_store_errors
+async def create_circuit(request):
+    """A new circuit: {name, kind: "circuit"|"stage", start, finish (a stage), sectors: [line...], enabled}. A line is {a: [lat, lon], b: [lat, lon]}."""
+    body = await _body(request)
+    circuit_id = _circuits(request).create(body)
+    return web.json_response({"ok": True, "id": circuit_id})
+
+
+@_guard_store_errors
+async def save_circuit(request):
+    """Replace a circuit. `cleared` says its laps were cleared because its lines changed (they were timed over other lines)."""
+    body = await _body(request)
+    try:
+        cleared = _circuits(request).update(request.match_info["id"], body)
+    except NotFound:
+        return _error(404, "there is no such circuit")
+    return web.json_response({"ok": True, "cleared": cleared})
+
+
+@_guard_store_errors
+async def delete_circuit(request):
+    try:
+        _circuits(request).delete(request.match_info["id"])
+    except NotFound:
+        return _error(404, "there is no such circuit")
+    return web.json_response({"ok": True})
+
+
+@_guard_store_errors
+async def get_circuit_laps(request):
+    store, laps = _circuits(request), request.app[LAPS]
+    try:
+        circuit = store.get(request.match_info["id"])
+    except NotFound:
+        return _error(404, "there is no such circuit")
+    return web.json_response({"circuit": circuit, "laps": laps.laps(circuit["id"]), "bests": laps.bests(circuit["id"])})
+
+
+@_guard_store_errors
+async def clear_circuit_laps(request):
+    """Forget a circuit's laps and bests (the circuit stays)."""
+    store, laps = _circuits(request), request.app[LAPS]
+    try:
+        circuit = store.get(request.match_info["id"])
+    except NotFound:
+        return _error(404, "there is no such circuit")
+    laps.clear(circuit["id"])
+    return web.json_response({"ok": True})
+
+
+async def get_route(request):
+    """The GPS route as it is now: {active, name, remaining, eta, off, version, and, once the game has sent them, points (the planned line as
+    [lat, lon] pairs), dest and waypoints}, with whether the game is connected. Anyone may look."""
+    notices = request.app[NOTICES]
+    state = request.app[HUB].route_state()
+    state["game"] = bool(notices and notices.game_connected())
+    return web.json_response(state)
+
+
+async def set_route(request):
+    """Set the GPS route through the given stops ({stops: [{lat, lon, name?}...]}, 1 to 11, the last the destination). The game plans it:
+    this answers when the game has said whether it took the stops (a few seconds at most), not when the route is planned (it then appears
+    through GET /api/route). This computer only."""
+    planner = request.app[ROUTE_PLANNER]
+    body = await _body(request)
+    if planner is None or not isinstance(body, dict):
+        return _error(404, "setting a route is not available in this run")
+    try:
+        result = await planner.set_route(body.get("stops"))
+    except ValidationError as e:
+        return _error(400, str(e))
+    if not result["ok"]:
+        return _error(409, result["why"] or "the game did not take the route")
+    return web.json_response({"ok": True})
+
+
+async def clear_route(request):
+    """Clear the GPS route in the game. This computer only."""
+    planner = request.app[ROUTE_PLANNER]
+    if planner is None:
+        return _error(404, "setting a route is not available in this run")
+    result = await planner.clear_route()
+    if not result["ok"]:
+        return _error(409, result["why"] or "the game did not clear the route")
+    return web.json_response({"ok": True})
+
+
+def _destinations(request):
+    store = request.app[DESTINATIONS]
+    if store is None:
+        raise web.HTTPNotFound(text="saved destinations are not available in this run")
+    return store
+
+
+async def list_destinations(request):
+    store = request.app[DESTINATIONS]
+    return web.json_response({"enabled": store is not None, "destinations": store.list() if store is not None else []})
+
+
+@_guard_store_errors
+async def create_destination(request):
+    """Save a destination: {name, lat, lon}. This computer only."""
+    body = await _body(request)
+    if not isinstance(body, dict):
+        return _error(400, "body must be an object")
+    item = _destinations(request).create(body.get("name"), body.get("lat"), body.get("lon"))
+    return web.json_response({"ok": True, "destination": item})
+
+
+async def delete_destination(request):
+    try:
+        _destinations(request).delete(request.match_info["id"])
+    except NotFound:
+        return _error(404, "there is no such destination")
+    return web.json_response({"ok": True})
+
+
 def add_routes(app):
     r = app.router
     r.add_get("/api/layouts", list_layouts)
@@ -572,6 +720,18 @@ def add_routes(app):
     r.add_post("/api/configs", create_config)
     r.add_put("/api/configs/{id}", save_config)
     r.add_delete("/api/configs/{id}", delete_config)
+    r.add_get("/api/route", get_route)
+    r.add_post("/api/route", set_route)
+    r.add_delete("/api/route", clear_route)
+    r.add_get("/api/destinations", list_destinations)
+    r.add_post("/api/destinations", create_destination)
+    r.add_delete("/api/destinations/{id}", delete_destination)
+    r.add_get("/api/circuits", list_circuits)
+    r.add_post("/api/circuits", create_circuit)
+    r.add_get("/api/circuits/{id}/laps", get_circuit_laps)
+    r.add_delete("/api/circuits/{id}/laps", clear_circuit_laps)
+    r.add_put("/api/circuits/{id}", save_circuit)
+    r.add_delete("/api/circuits/{id}", delete_circuit)
     r.add_post("/api/quit", quit_thrashdash)
     r.add_post("/api/triplog/test-popup", test_popup)
     r.add_get("/api/earth", earth_info)

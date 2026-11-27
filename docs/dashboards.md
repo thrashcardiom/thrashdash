@@ -90,9 +90,10 @@ Press **E** (or click **Edit**) to edit in place; the gauges keep running on liv
 
 **Working on the canvas**
 
-- Click a widget to select it; **Shift-click** to select several.
+- Click a widget to select it; **Shift-click** to select several, or **drag a box** over empty canvas to select every widget it touches (hold **Shift** to add to what is selected; **Esc** while dragging puts the selection back).
 - **Drag** to move (hold **Alt** to skip snapping). Drag a **handle** to resize (hold **Shift** to keep the shape).
 - **Arrow keys** nudge by 1 px (**Shift** = 10 px).
+- With two or more widgets selected, the panel's **Align** buttons line them up (left, centre, right, top, middle, bottom, against the box around them), and with three or more **Space evenly** (across or down) makes the gaps equal, the outer two staying put. Each is one undo step.
 - Copy, paste and duplicate with **Ctrl+C**, **Ctrl+V**, **Ctrl+D**; **Delete** removes. **[** and **]** send a widget backward or forward.
 - **Ctrl+Z** and **Ctrl+Y** undo and redo, **Ctrl+S** saves, **Esc** cancels a drag or deselects, **E** or **Done** leaves.
 
@@ -103,10 +104,11 @@ Press **E** (or click **Edit**) to edit in place; the gauges keep running on liv
 | **Selection** | The selected widget's properties. Channel properties open the **channel picker**: search every channel the game is sending, with its live value. You can also type a channel name that is not in the current data. |
 | **Add widget** | One button per [widget type](#widget-reference). |
 | **Dashboard** | Choose, rename, save, save as, create, delete, import, export a dashboard; canvas size, **Look (skin)**, **Match window size** and **Match screen size**, and **Scale in window**. |
+| **Colours** | The dashboard's [theme](#themes): a picker for each of seven colours. |
 | **Display** | Units and snap-to-grid. |
 | **Vehicle dashboards** | Every per-vehicle rule, with a button to remove it. |
 | **Windows** | Whether to [reopen your windows](../README.md#windows-remembering-saving-and-closing) at startup, and exact placement. |
-| **Alerts** | Which [alerts](#alerts) you want. |
+| **Alerts** | Which [alerts](#alerts) you want, the over-limit margin, and the [alert sound](#alert-sound). |
 
 The built-in **Default** is read-only; saving it creates your own copy. A dashboard with unsaved changes asks before you leave or switch.
 
@@ -313,6 +315,39 @@ A live map of the trip being driven, on a dashboard, placed and sized like any o
 
 Because the map needs pictures from two map servers, the dashboard page's policy now allows a frame of this site (`frame-src 'self'`); the frame is the Trips page, which alone is allowed to load the map pictures (see [The Trips page](../README.md#the-trips-page)).
 
+### Speed limit sign (BeamNG.Earth)
+
+The speed limit of the road the car is on, drawn as a road sign: **round** with a red ring (European) or a **box** headed "SPEED LIMIT" (North American), with your own speed under it. The limit is shown in your speed unit. BeamNG.Earth only sometimes reads a limit from a real sign; the rest is a guess from the kind of road. The sign says so: a guess is drawn dashed and faded with "est." under it, and the sign turns red (and pulses) only against a **posted** limit, more than 1 m/s over it. With no limit known it fades and says "no limit known". Layout type: `speedlimit`. Default size 200 × 240.
+
+| Property | Type | What it does | Values |
+|:---|:---|:---|:---|
+| `speedChannel` | channel | Your speed | default `wheelspeed` |
+| `style` | choice | The kind of sign | `round`, `box` |
+| `showSpeed` | on/off | Your speed under the sign | default on |
+
+### Route and ETA (BeamNG.Earth)
+
+Progress along the GPS route set in BeamNG.Earth: the destination, the **arrival time** (your computer's clock), the **time left** and the **distance left** (in your distance unit), and an "Off the route" warning when the car is more than 50 m from it. While BeamNG.Earth is planning it says **"Re-routing…"** (a new route for one you already had, as after a wrong turn) or "Planning route…" (the first one), for at least 3 seconds, in place of the warning. Earth plans again by itself once you are more than about 120 m off the route or driving back along it, and no more than once every 20 seconds. There is also an optional [alert](#alerts) for leaving the route. With no route set it says "No route set" and dims, so a dashboard that has this widget still looks right on a drive without one.
+
+At the top it shows the **next turn**: an arrow, how far away it is (in your distance unit: `300 m`, `1.2 km`, or `250 ft`, `0.4 mi`, and "Now" when it is here), and in words: "Turn left onto Oriental Parade", "Keep left at the fork onto Aotea Quay", "At the roundabout take the 2nd exit onto Evans Bay Parade", "Arrive: your destination is on the left". A second maneuver that comes within 300 m after it is added as a quieter "then ..." line. A maneuver stays shown until the car is about 15 m past it. It needs a BeamNG.Earth app new enough to send a route's steps (the API's `routeSteps`); with an older one the rest of the panel works and the next turn is simply not shown. After a wrong turn the steps of the old route are never used: the next turn comes back when the new route's steps arrive. Layout type: `route`. Default size 300 × 340.
+
+| Property | Type | What it does | Values |
+|:---|:---|:---|:---|
+| `label` | text | Title | up to 20 characters |
+| `showNext` | on/off | The next turn | default on |
+| `showName` | on/off | The destination | default on |
+| `showOff` | on/off | The off-route warning | default on |
+
+### Lap timer
+
+This lap's clock, the gap to your best lap, the last and best laps, and each sector. The laps are timed by the relay from the car's position across lines drawn on the Trips page (see [Lap and sector timing](../README.md#lap-and-sector-timing)), so this only shows them; it needs BeamNG.Earth and a circuit. Times are to a tenth of a second. The gap (`+0.4` behind, `-0.3` ahead, green when ahead and red when behind) is against your best lap in the car you are driving, by distance round the lap, so it moves smoothly and needs no sector lines. A new best lap is purple, and so is a sector that was the best yet. A lap that missed a sector line is shown struck through, as "not valid". Before a start line has been crossed it says "Not timing". Layout type: `laptimer`. Default size 320 × 320.
+
+| Property | Type | What it does | Values |
+|:---|:---|:---|:---|
+| `label` | text | Title (the circuit's name is shown while timing) | up to 20 characters |
+| `showDelta` | on/off | The gap to your best lap | default on |
+| `showSectors` | on/off | The sector times | default on |
+
 ### Trip computer
 
 One of the two trip meters (see [Trip computer](#trip-computer)). Layout type: `trip`. Default size 300 × 340.
@@ -324,6 +359,12 @@ One of the two trip meters (see [Trip computer](#trip-computer)). Layout type: `
 | `showFuel` | on/off | Show fuel / energy used and economy |  |
 | `showRange` | on/off | Show range left |  |
 
+
+### Themes
+
+A dashboard can carry its own **colours**: the page behind it, its panels, text, quiet text, an accent, and the warning and critical colours. Choose them under **Colours** in the editor; **Default** puts one back and **Reset all colours** takes the whole theme off. Unlike a look, a theme is **part of the dashboard**: it is saved with it, comes and goes with undo, and travels in an exported file. A theme only holds the colours you changed; the rest stay as they are.
+
+A theme is applied to the **canvas**, not to the editor panel, the alert banner or the menus, so those stay readable whatever you choose. The page behind the canvas takes the background colour. The [looks](#looks-skins) other than the flat one draw their instruments in their own colours, so a theme shows most on the flat look. Only plain `#rrggbb` colours are accepted, from the editor or a file.
 
 ## Looks (skins)
 
@@ -361,6 +402,8 @@ A **channel** is one named value from the game: `rpm`, `wheelspeed`, `tire.FL.te
 | **Component states** | 4 per second | `state.<group>.<name>`, what the game's damage tracker reports (only those the current car has) | `state.engine.oilOverheating`, `state.engine.coolantOverheating` |
 | **Energy kind** | 4 per second | `energy.electric`, `energy.liquid` | whether the car has a battery, a fuel tank, or both |
 | **Trip computer** | every frame | `trip.A.*`, `trip.B.*` and `trip.energyKind`, kept by the relay | `trip.A.distance`, `trip.B.consumption`, `trip.A.range` |
+| **Road and route** | every second | `geo.limit` (m/s) and `geo.limitPosted`, only while a limit is known; `geo.route.active`, and while a route is set `geo.route.remaining` (m), `.eta` (s), `.off` (m), `.name`, `.planning` (a route is being planned, or just was) and `.replanning` (it replaces one you already had); and, when the route's steps are known, the next maneuver: `geo.route.next.distance` (m), `.type`, `.modifier`, `.street`, `.exit` (a roundabout's exit number) and the one after it: `geo.route.then.gap` (m after the next one), `.type`, `.modifier`, `.street`, `.exit`. From BeamNG.Earth; each is dropped if the game goes quiet for 4 seconds, so a stale limit can never show or alert. | `geo.limit`, `geo.route.remaining` |
+| **Lap timing** | with every live position (ten a second) | `lap.active`, `lap.circuit`, `lap.number`, `lap.time`, `lap.delta` (s, + is behind your best), `lap.sector`, `lap.sectors`, `lap.best`, `lap.last`, `lap.lastValid`, `lap.lastDelta`, `lap.lastIsBest`, and per sector `lap.s1.last`, `.best`, `.isBest` (up to nine sectors). Worked out by the relay (`laps.py`); each is dropped if no position has arrived for two seconds. | `lap.time`, `lap.delta`, `lap.s2.last` |
 
 Channels carry numbers, booleans or short text. Lists and other structures are skipped, and `NaN` or infinity are dropped.
 
@@ -405,11 +448,23 @@ A banner across every dashboard (also on phones) when the game reports a problem
 | Low tyre pressure | Warning (amber) | The game's low tyre pressure warning (not shown on top of a flat). |
 | Brakes overheating | Warning (amber) | The game's brake-overheating flag. |
 | Over-revving | Warning (amber) | The game reports an over-rev danger. |
+| Over the posted speed limit | Warning (amber) | Your speed (`wheelspeed`) stays above a **posted** limit plus a margin for two seconds. Only limits read from a real sign count, never a guess from the kind of road. The text names the limit, for example "Over the speed limit (50 km/h)". Needs BeamNG.Earth. |
+| Off the GPS route | Warning (amber) | **Off until you tick it.** The car stays more than 50 m from BeamNG.Earth's GPS route for three seconds. It clears when you are back on the route or Earth has planned a new one. Needs BeamNG.Earth. |
 
 Switch them on or off, all or one by one, in the editor under **Alerts**. It is a display setting kept by the relay, like units.
 
+The **over-limit alert is optional like the others**: untick it under **Alerts** and it never shows (the sign widget still works). The **Over-limit margin** box there sets how far over a posted limit you may go before it shows (default 5 km/h, in your speed unit; 0 means any excess). The margin is saved in metres a second, so it keeps its meaning if you change the speed unit.
+
 ![The alert banner over a dashboard](screenshots/alerts.png)
 
+
+### Alert sound
+
+A short **tone** when an alert appears, off until you switch it on: **Alerts → Play a sound when an alert appears**. A warning is one note and a critical alert two, falling, so they can be told apart by ear. It is a setting of **this window** (kept in this browser, not by the relay), because it depends on which screen you are listening at: a second monitor does not chime in step with the first, and a phone has its own (add `?sound=1` to its address). Choose the volume, and use the **Test** buttons to hear them.
+
+- A chime is made for an alert that was not showing and now is; one that stays up chimes once, and one that goes away and comes back chimes again. Chimes are never closer than two seconds, and alerts already showing when a window opens do not chime.
+- The tone is made in the browser, so nothing is loaded and the page's security policy is unchanged.
+- A browser holds sound back until the page has been clicked once. Windows ThrashDash opens itself are started allowing it. In any other window the editor says "This browser has not allowed sound yet" until you click it once (switching the sound on or pressing a Test button counts).
 
 ### Tyres, damage and component states
 
@@ -474,6 +529,7 @@ A dashboard is a small JSON file. The relay validates it on every write (structu
 | `width`, `height` | Canvas size in pixels: 200 to 4000 wide, 100 to 4000 high. |
 | `scaleMode` | `max` (default): fill the window but never go beyond `scalePercent`; `fit`: always fill the window; `fixed`: exactly `scalePercent`. |
 | `scalePercent` | 10 to 400. |
+| `theme` | Optional: colours for the flat look, any of `bg`, `panel`, `text`, `muted`, `accent`, `warn`, `crit`, each a `#rrggbb` string (see [Themes](#themes)). Other names are dropped; a value that is not a plain hex colour is refused. Absent when no colour was changed. |
 | `widgets` | Up to 200. Each has a unique `id` (letters, digits, `-`, `_`), a `type`, `x`, `y`, `w`, `h` and the properties from the [widget reference](#widget-reference). |
 
 A look is deliberately not part of this file. Limits: 100 saved dashboards, and write requests are capped at 256 KB.

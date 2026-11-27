@@ -54,7 +54,16 @@ local function installEarth(overrides)
     place = function() return { street = "Oriental Parade", country = "New Zealand" } end,
     speedLimit = function() return { ms = 13.89, mapped = true, unit = "kmh", extra = "dropped" } end,
     weather = function() return { tempC = 15, windMs = 4.4, secret = 1 } end,
-    gps = function() return { remaining = 1000, eta = 90, name = "x", waypoints = {} } end,
+    gps = function() return { remaining = 1000, eta = 90, name = "x", waypoints = {}, routeVersion = 3 } end,
+    gpsRoute = function()
+      return { version = 3, dist = 1500, points = { { 1, 2 } }, steps = {
+        { type = "depart", name = "Hutt Road", offset = 0, distance = 485, leg = 1, location = { lat = 1, lon = 2 }, duration = 70 },
+        { type = "turn", modifier = "slight left", name = string.rep("x", 200), offset = 485, distance = 810 },
+        { type = "roundabout", exit = 2, offset = 1295, distance = 31, name = "" },
+        { type = "arrive", modifier = "left", offset = 1500, distance = 0 },
+        { type = "broken" }, "not a step",
+      } }
+    end,
   }
   for k, v in pairs(overrides or {}) do api[k] = v end
   rawset(_G, "beamngEarth_api", api)
@@ -64,6 +73,11 @@ local function load()
   resetGame()
   local mod = dofile(MOD)
   return mod
+end
+
+local function say(text, table_, from)
+  wire[text] = table_
+  inbox[#inbox + 1] = { data = text, ip = from and from.ip, port = from and from.port }
 end
 
 local function ofType(kind)
@@ -193,6 +207,30 @@ do
   check("the clock climbs", live[10].rt > live[1].rt)
 end
 
+-- game time, for lap timing: it stands still while the game is paused and runs slow in slow motion
+do
+  local M = load()
+  installEarth()
+  M.onExtensionLoaded()
+  for _ = 1, 10 do M.onUpdate(0.1, 0.1) end -- ten live positions at normal speed
+  for _ = 1, 10 do M.onUpdate(0.1, 0) end -- paused
+  for _ = 1, 10 do M.onUpdate(0.1, 0.05) end -- half speed
+  local live = ofType("geolive")
+  check("every live position carries the game's clock as well as the real one", #live == 30 and type(live[1].st) == "number", #live)
+  check("normal speed: game time keeps pace with real time", math.abs((live[10].st - live[1].st) - (live[10].rt - live[1].rt)) < 1e-9)
+  check("paused: real time passes and game time does not", live[20].rt > live[10].rt and live[20].st == live[10].st)
+  check("slow motion: game time runs at the game's own rate", math.abs((live[30].st - live[20].st) - 0.5) < 1e-9, live[30].st - live[20].st)
+end
+
+do
+  local M = load()
+  installEarth()
+  M.onExtensionLoaded()
+  for _ = 1, 10 do M.onUpdate(0.1) end -- (a caller that gives no game time: taken as real time)
+  local live = ofType("geolive")
+  check("without a game time it follows the real one", live[10].st == live[10].rt)
+end
+
 do
   local M = load()
   installEarth()
@@ -244,6 +282,264 @@ do
   check("the place name comes through", info[2].place and info[2].place.street == "Oriental Parade" and info[2].place.country == "New Zealand")
   check("the weather keeps only what the relay reads", tenth.wx and tenth.wx.tempC == 15 and tenth.wx.secret == nil)
   check("the route keeps only what the relay reads", tenth.gps and tenth.gps.remaining == 1000 and tenth.gps.name == nil and tenth.gps.waypoints == nil)
+end
+
+-- ---- the route for the dashboard: its own packet, every second ----------------------------------------------------------------
+do
+  local M = load()
+  installEarth()
+  M.onExtensionLoaded()
+  for _ = 1, 12 do M.onUpdate(1) end
+  local route = ofType("georoute")
+  check("the route's progress goes to the dashboard every second", #route == 12, #route)
+  check("it keeps what the route widget shows", route[1].gps and route[1].gps.remaining == 1000 and route[1].gps.eta == 90 and route[1].gps.name == "x" and route[1].gps.waypoints == nil)
+  check("and the trip log's own packets are not made more frequent", #ofType("geoinfo") == 12)
+end
+
+-- ---- the planned route's line, for the maps ---------------------------------------------------------------------------------------
+do
+  local M = load()
+  local many = {}
+  for i = 1, 1203 do many[i] = { -41.3 + i * 1e-5, 174.8 + i * 1e-5 } end
+  installEarth({
+    gps = function() return { lat = -41.29, lon = 174.79, name = "Home", remaining = 1000, routeVersion = 4, waypoints = { { lat = -41.2, lon = 174.7, name = "Cafe", extra = 1 }, "bad" } } end,
+    gpsRoute = function() return { version = 4, dist = 5000, points = many, steps = {} } end,
+  })
+  M.onExtensionLoaded()
+  for _ = 1, 3 do M.onUpdate(1) end
+  local paths = ofType("georoutepath")
+  check("the route's line is sent once when a route appears", #paths == 1, #paths)
+  local g = paths[1] or { points = {} }
+  local same = #g.points == #many
+  for i = 1, #many do same = same and g.points[i] ~= nil and g.points[i][1] == many[i][1] and g.points[i][2] == many[i][2] end
+  check("a line that fits is sent just as Earth gave it, no point left out", same, #g.points)
+  check("as [lat, lon] pairs", type(g.points[2][1]) == "number" and type(g.points[2][2]) == "number")
+  check("with the destination and the stops still ahead", g.dest and g.dest.name == "Home" and g.dest.lat == -41.29 and #g.waypoints == 1 and g.waypoints[1].name == "Cafe" and g.waypoints[1].extra == nil)
+  check("and its version", g.version == 4)
+  for _ = 1, 20 do M.onUpdate(1) end
+  check("and sent again every twenty seconds", #ofType("georoutepath") == 2, #ofType("georoutepath"))
+end
+
+do
+  local M = load()
+  installEarth({ gpsRoute = function() return { points = { { 1, 2 } }, steps = nil } end })
+  M.onExtensionLoaded()
+  for _ = 1, 3 do M.onUpdate(1) end
+  check("a line of fewer than two points is not sent", #ofType("georoutepath") == 0)
+  installEarth({ gpsRoute = function() return { points = { { 1, 2 }, { "x", 3 }, { 3, 4 } } } end })
+end
+
+-- A line too long to send whole is simplified by its shape: every point left out must still lie close to the line sent.
+do
+  local METRES = 111320
+  local LAT = -41.3
+  local ACROSS = METRES * math.cos(math.rad(LAT))
+  local function at(x, y) return { LAT + y / METRES, 174.8 + x / ACROSS } end
+  -- the farthest (m) any point of `line` is from `sent`, whose points are some of the line's own, in order
+  local function worst(line, sent)
+    local far, k = 0, 1
+    for _, p in ipairs(line) do
+      if k < #sent and p[1] == sent[k + 1][1] and p[2] == sent[k + 1][2] then
+        k = k + 1
+      else
+        local a, b = sent[k], sent[math.min(k + 1, #sent)]
+        local dx, dy = (b[2] - a[2]) * ACROSS, (b[1] - a[1]) * METRES
+        local px, py = (p[2] - a[2]) * ACROSS, (p[1] - a[1]) * METRES
+        local len2 = dx * dx + dy * dy
+        local t = len2 > 0 and math.max(0, math.min(1, (px * dx + py * dy) / len2)) or 0
+        far = math.max(far, math.sqrt((px - t * dx) ^ 2 + (py - t * dy) ^ 2))
+      end
+    end
+    return far, k
+  end
+  local function sentFor(line)
+    local M = load()
+    installEarth({ gps = function() return { routeVersion = 7 } end, gpsRoute = function() return { points = line, dist = 1 } end })
+    M.onExtensionLoaded()
+    for _ = 1, 3 do M.onUpdate(1) end
+    local p = ofType("georoutepath")[1]
+    return p and p.points or {}, M
+  end
+
+  -- long straights with a tight bend now and then, as Earth gives a road: few points on the straights, many in the bends
+  local road, x, y, h = { at(0, 0) }, 0, 0, 0
+  for bend = 1, 220 do
+    x, y = x + 600 * math.cos(h), y + 600 * math.sin(h)
+    road[#road + 1] = at(x, y)
+    local turn = (bend % 2 == 0 and 1 or -1) * math.rad(80)
+    for _ = 1, 16 do
+      h = h + turn / 16
+      x, y = x + 4 * math.cos(h), y + 4 * math.sin(h)
+      road[#road + 1] = at(x, y)
+    end
+  end
+  local sent = sentFor(road)
+  local far, reached = worst(road, sent)
+  check("a long winding route is cut down to what one datagram holds", #road > 3000 and #sent <= 1500 and #sent >= 500, #road .. " -> " .. #sent)
+  check("the points sent are Earth's own, in order, from first to last", reached == #sent and sent[1][1] == road[1][1] and sent[#sent][2] == road[#road][2], reached .. " of " .. #sent)
+  check("and no bend is cut: every point left out is within 16 m of the line sent", far <= 16.1, far)
+
+  -- the worst there can be: six thousand points that all matter
+  local saw = {}
+  for i = 1, 6000 do saw[i] = at(i * 30, (i % 2) * (20 + i % 7 * 15)) end
+  local few = sentFor(saw)
+  check("a line where every point matters still fits", #few >= 2 and #few <= 1500, #few)
+
+  -- across the date line
+  local over = {}
+  for i = 1, 2000 do
+    local lon = 179.9 + i * 1e-4
+    over[i] = { -17 + math.sin(i / 20) * 1e-3, lon > 180 and lon - 360 or lon }
+  end
+  local across = sentFor(over)
+  check("a route across the date line is thinned the same way", #across <= 1500 and #across > 100, #across)
+end
+
+-- ---- setting and clearing the route from ThrashDash --------------------------------------------------------------------------------
+local RELAY = { ip = "127.0.0.1", port = 4568 }
+local function acks() return ofType("georouteack") end
+
+do
+  local M = load()
+  local calls = {}
+  installEarth({
+    gpsSet = function(...) calls[#calls + 1] = { "set", ... }; return true end,
+    gpsSetRoute = function(points) calls[#calls + 1] = { "route", points }; return true end,
+    gpsClear = function() calls[#calls + 1] = { "clear" } end,
+  })
+  M.onExtensionLoaded()
+  say("r1", { type = "route", action = "set", stops = { { lat = -41.3, lon = 174.8, name = "A" }, { lat = -41.4, lon = 174.9, name = "B", evil = 1 } } }, RELAY)
+  M.onUpdate(0.1)
+  check("two stops set a route through them", calls[1] and calls[1][1] == "route" and #calls[1][2] == 2 and calls[1][2][2].name == "B" and calls[1][2][2].evil == nil)
+  check("and the page is told it worked", acks()[1] and acks()[1].ok == true)
+  say("r2", { type = "route", action = "set", stops = { { lat = -41.3, lon = 174.8, name = "Home" } } }, RELAY)
+  M.onUpdate(0.1)
+  check("one stop is a destination", calls[2] and calls[2][1] == "set" and calls[2][2] == -41.3 and calls[2][3] == 174.8 and calls[2][4] == "Home")
+  say("r3", { type = "route", action = "clear" }, RELAY)
+  M.onUpdate(0.1)
+  check("clear takes the route away", calls[3] and calls[3][1] == "clear" and acks()[3].ok == true)
+  check("each command is answered", #acks() == 3)
+end
+
+do
+  local M = load()
+  local calls = 0
+  installEarth({ gpsSet = function() calls = calls + 1; return true end, gpsSetRoute = function() calls = calls + 1; return true end, gpsClear = function() calls = calls + 1 end })
+  M.onExtensionLoaded()
+  local twelve = {}
+  for i = 1, 12 do twelve[i] = { lat = -41, lon = 174 } end
+  for n, bad in ipairs({
+    { type = "route", action = "set", stops = { { lat = 95, lon = 0 } } }, { type = "route", action = "set", stops = { { lat = 0, lon = 181 } } },
+    { type = "route", action = "set", stops = { { lat = "x", lon = 0 } } }, { type = "route", action = "set", stops = twelve },
+    { type = "route", action = "set", stops = {} }, { type = "route", action = "set", stops = "home" }, { type = "route", action = "set" },
+    { type = "route", action = "dance", stops = { { lat = 1, lon = 1 } } }, { type = "route" },
+  }) do
+    say("bad" .. n, bad, RELAY)
+  end
+  for _ = 1, 3 do M.onUpdate(0.1) end -- (at most four messages are taken a frame)
+  check("bad requests change nothing in the game", calls == 0, calls)
+  check("and each is refused, saying so", #acks() == 9 and not acks()[1].ok and not acks()[9].ok, #acks())
+  say("elsewhere", { type = "route", action = "clear" }, { ip = "127.0.0.1", port = 9999 })
+  say("stranger", { type = "route", action = "clear" }, { ip = "192.168.1.5", port = 4568 })
+  M.onUpdate(0.1)
+  check("only the relay's own address is believed", calls == 0 and #acks() == 9)
+end
+
+do
+  local M = load()
+  installEarth({ gpsSetRoute = function() return false, "too far apart" end, gpsSet = function() error("boom") end })
+  M.onExtensionLoaded()
+  say("x1", { type = "route", action = "set", stops = { { lat = -41, lon = 174 }, { lat = -40, lon = 175 } } }, RELAY)
+  say("x2", { type = "route", action = "set", stops = { { lat = -41, lon = 174 } } }, RELAY)
+  M.onUpdate(0.1)
+  check("a route BeamNG.Earth will not take is reported with its reason", acks()[1] and acks()[1].ok == false and acks()[1].why == "too far apart")
+  check("and an error inside it never reaches the game", acks()[2] and acks()[2].ok == false and acks()[2].why:find("refused", 1, true) ~= nil)
+end
+
+do
+  local M = load()
+  installEarth()
+  M.onExtensionLoaded()
+  world.inWorld = false
+  say("w", { type = "route", action = "set", stops = { { lat = -41, lon = 174 } } }, RELAY)
+  M.onUpdate(0.1)
+  check("with no BeamNG.Earth level loaded it says so", acks()[1] and acks()[1].ok == false and acks()[1].why:find("not loaded", 1, true) ~= nil)
+end
+
+-- ---- the route's steps, for "next turn" --------------------------------------------------------------------------------------------
+do
+  local M = load()
+  installEarth()
+  M.onExtensionLoaded()
+  for _ = 1, 5 do M.onUpdate(1) end
+  local steps = ofType("geosteps")
+  check("the steps are sent once when a route appears", #steps == 1, #steps)
+  local g = steps[1] or { steps = {} }
+  check("with the route's version and length", g.version == 3 and g.dist == 1500)
+  check("keeping only usable steps, and only what the widget reads", #g.steps == 4 and g.steps[1].type == "depart" and g.steps[1].name == "Hutt Road" and g.steps[1].offset == 0 and g.steps[1].leg == nil and g.steps[1].location == nil and g.steps[1].duration == nil)
+  check("text is cut short", #g.steps[2].name == 60 and g.steps[2].modifier == "slight left")
+  check("a roundabout carries its exit number", g.steps[3].exit == 2 and g.steps[3].name == "")
+  check("the progress packets say which version of the route they are about", ofType("georoute")[1].gps.routeVersion == 3)
+  for _ = 1, 20 do M.onUpdate(1) end
+  check("the steps are sent again every twenty seconds (a relay started later would miss them)", #ofType("geosteps") == 2, #ofType("geosteps"))
+end
+
+do
+  local M = load()
+  local version = 1
+  installEarth({ gps = function() return { remaining = 10, routeVersion = version } end })
+  M.onExtensionLoaded()
+  for _ = 1, 3 do M.onUpdate(1) end
+  version = 2 -- the route was re-planned (a wrong turn)
+  M.onUpdate(1)
+  local steps = ofType("geosteps")
+  check("a re-planned route's steps are sent at once", #steps == 2 and steps[2].version == 2, #steps)
+end
+
+do
+  local M = load()
+  installEarth({ gps = function() return nil end })
+  M.onExtensionLoaded()
+  for _ = 1, 25 do M.onUpdate(1) end
+  check("with no route no steps are sent", #ofType("geosteps") == 0)
+end
+
+do
+  local M = load()
+  local on = false
+  installEarth({ gps = function() return on and { remaining = 10, routeVersion = 7 } or nil end })
+  M.onExtensionLoaded()
+  for _ = 1, 3 do M.onUpdate(1) end
+  on = true
+  for _ = 1, 2 do M.onUpdate(1) end
+  check("a route set later has its steps sent when it appears", #ofType("geosteps") == 1)
+  on = false
+  M.onUpdate(1)
+  on = true
+  M.onUpdate(1) -- cleared, then the same version set again
+  check("and sent again if the route was cleared and set again", #ofType("geosteps") == 2, #ofType("geosteps"))
+end
+
+do
+  local M = load()
+  installEarth({ gpsRoute = function() return nil end })
+  M.onExtensionLoaded()
+  for _ = 1, 5 do M.onUpdate(1) end
+  check("a route with no steps (an older BeamNG.Earth app) sends none, and does not ask again every second", #ofType("geosteps") == 0)
+  local N = load()
+  installEarth({ gpsRoute = function() error("boom") end })
+  N.onExtensionLoaded()
+  for _ = 1, 5 do N.onUpdate(1) end
+  check("a failing route read never disturbs the game", #ofType("georoute") == 5, #ofType("georoute"))
+end
+
+do
+  local M = load()
+  installEarth({ gps = function() return nil end })
+  M.onExtensionLoaded()
+  for _ = 1, 3 do M.onUpdate(1) end
+  local route = ofType("georoute")
+  check("with no route the packet is still sent, saying so by carrying nothing", #route == 3 and route[1].gps == nil, #route)
 end
 
 do
@@ -380,10 +676,10 @@ do
   local warned = 0
   for _, l in ipairs(logs) do if l:find("could not send", 1, true) then warned = warned + 1 end end
   check("a failing send is logged once, not every second", warned == 1, warned)
-  check("failures are counted (a position, a reading and a live position each time)", M.status().failed == 15, M.status().failed)
+  check("failures are counted (a position, a reading, the route and a live position each time, and the route's steps once)", M.status().failed == 21, M.status().failed)
   sendFails = false
   M.onUpdate(1)
-  check("sending resumes by itself when the relay comes back", M.status().sent == 3, M.status().sent)
+  check("sending resumes by itself when the relay comes back", M.status().sent == 4, M.status().sent)
 end
 
 do
@@ -406,11 +702,6 @@ do
 end
 
 -- ---- messages from the relay ---------------------------------------------------------------------------------------------
-local function say(text, table_, from)
-  wire[text] = table_
-  inbox[#inbox + 1] = { data = text, ip = from and from.ip, port = from and from.port }
-end
-
 do
   local M = load()
   installEarth()
@@ -513,10 +804,10 @@ do
 end
 
 do
-  local unload
-  rawset(_G, "setExtensionUnloadMode", function(name, mode) unload = { name, mode } end)
+  local unload = {}
+  rawset(_G, "setExtensionUnloadMode", function(name, mode) unload[name] = mode end) -- (every extension the script names, not only the last)
   dofile(SCRIPT)
-  check("the mod script keeps the extension loaded across levels", unload and unload[1] == "thrashdash_trips" and unload[2] == "manual")
+  check("the mod script keeps the extension loaded across levels", unload["thrashdash_trips"] == "manual")
   -- the name must be the file's path with '/' written as '_' (the game maps it back; getting this wrong cost a drive once)
   local path = MOD:gsub("^mod/lua/ge/extensions/", ""):gsub("%.lua$", ""):gsub("/", "_")
   check("the extension name matches its file path", path == "thrashdash_trips", path)

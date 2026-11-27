@@ -3,7 +3,7 @@
 // widgets themselves never need to know they are being edited.
 import { h } from "../dom.js";
 import { dialogOpen } from "./dialog.js";
-import { dragRects, resizeRect, snap } from "./geometry.js";
+import { dragRects, rectBetween, resizeRect, snap, widgetsInRect } from "./geometry.js";
 import { LayoutManager } from "./manager.js";
 import { Panel } from "./panel.js";
 import { pickChannel, pickerOpen } from "./picker.js";
@@ -31,6 +31,7 @@ export function openEditor(host) {
   let grid = loadGrid();
   let addCount = 0;
   let drag = null;
+  let marquee = null; // a box being dragged over empty canvas to select what it touches: {start (design px), base (ids kept), el, moved, x, y}
   let panel = null;
   let statusTimer = null;
 
@@ -128,7 +129,12 @@ export function openEditor(host) {
     const handleEl = e.target.closest(".eh");
     const frame = e.target.closest(".ef");
     if (!frame) {
+      // Empty canvas: a click clears the selection, and a drag draws a box that selects what it touches (with Shift, adding to what was selected).
+      const base = e.shiftKey ? [...state.selection] : [];
       if (!e.shiftKey) state.clearSelection();
+      marquee = { start: designPoint(e), base, el: null, moved: false, x: e.clientX, y: e.clientY };
+      layer.setPointerCapture(e.pointerId);
+      e.preventDefault();
       return;
     }
     const id = frame.dataset.id;
@@ -147,7 +153,22 @@ export function openEditor(host) {
     e.preventDefault();
   });
 
+  /** Where a pointer event is on the canvas, in layout (design) pixels. */
+  function designPoint(e) {
+    const r = layer.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / scale(), y: (e.clientY - r.top) / scale() };
+  }
+
   layer.addEventListener("pointermove", (e) => {
+    if (marquee) {
+      if (!marquee.moved && Math.hypot(e.clientX - marquee.x, e.clientY - marquee.y) < DRAG_THRESHOLD_PX) return;
+      marquee.moved = true;
+      marquee.el ??= h("div", "ed-marquee", layer);
+      const box = rectBetween(marquee.start, designPoint(e));
+      place(marquee.el, box);
+      state.select([...new Set([...marquee.base, ...widgetsInRect(state.widgets, box)])]);
+      return;
+    }
     if (!drag) return;
     const dxScreen = e.clientX - drag.startX;
     const dyScreen = e.clientY - drag.startY;
@@ -164,6 +185,13 @@ export function openEditor(host) {
   });
 
   const endDrag = (cancel = false) => {
+    if (marquee) {
+      const m = marquee;
+      marquee = null;
+      m.el?.remove();
+      if (cancel && m.moved) state.select(m.base); // Esc puts the selection back as it was
+      return;
+    }
     if (!drag) return;
     const d = drag;
     drag = null;
@@ -190,7 +218,7 @@ export function openEditor(host) {
     const key = e.key.toLowerCase();
 
     if (key === "escape") {
-      if (drag) endDrag(true);
+      if (drag || marquee) endDrag(true);
       else if (typing(e.target)) e.target.blur();
       else state.clearSelection();
       return;

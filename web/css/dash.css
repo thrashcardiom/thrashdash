@@ -245,6 +245,66 @@ body.editing #trip-notice { display: none; }
 }
 #zoom-toast.show { opacity: 1; }
 
+/* Speed limit sign: a round (European) or boxed (North American) road sign, the car's own speed under it. */
+.w-limit { container-type: size; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2cqh; background: var(--panel); border-radius: 12px; }
+.lm-sign { display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fff; color: #111; font-weight: 800; line-height: 1; }
+.lm-round .lm-sign { width: min(70cqw, 62cqh); aspect-ratio: 1; border-radius: 50%; border: min(7cqw, 6.2cqh) solid #d62828; }
+.lm-round .lm-num { font-size: min(30cqw, 26cqh); }
+.lm-box .lm-sign { width: min(62cqw, 54cqh); aspect-ratio: 4 / 5; border-radius: 8px; border: min(2.4cqw, 2.1cqh) solid #111; padding: 3cqh 0; }
+.lm-box .lm-top { font-size: min(8cqw, 7cqh); letter-spacing: 0.04em; }
+.lm-box .lm-num { font-size: min(32cqw, 28cqh); }
+.lm-cap { font-size: min(8cqw, 7cqh); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); min-height: 1.2em; }
+.lm-now { font-size: min(11cqw, 10cqh); font-weight: 600; color: var(--text); }
+.w-limit.estimated .lm-sign { opacity: 0.72; border-style: dashed; }
+.w-limit.missing .lm-sign { opacity: 0.3; }
+.w-limit.over .lm-sign { background: #fff1f1; animation: lm-pulse 0.9s ease-in-out infinite alternate; }
+.w-limit.over .lm-now { color: var(--crit); }
+@keyframes lm-pulse { from { box-shadow: 0 0 0 0 rgba(255, 77, 77, 0.0); } to { box-shadow: 0 0 min(5cqw, 5cqh) min(1.5cqw, 1.5cqh) rgba(255, 77, 77, 0.65); } }
+@media (prefers-reduced-motion: reduce) { .w-limit.over .lm-sign { animation: none; box-shadow: 0 0 0 3px var(--crit); } }
+
+/* Route and ETA: the destination, when you arrive and how much is left. */
+.w-route { container-type: size; display: flex; flex-direction: column; justify-content: center; gap: 1cqh; padding: 2cqh 5cqw; background: var(--panel); border-radius: 12px; }
+.rt-title { font-size: min(5.5cqw, 7cqh); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
+.rt-dest { font-size: min(8cqw, 10cqh); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 0.8cqh 0; border-top: 1px solid rgba(125, 138, 156, 0.18); }
+.rt-label { font-size: min(5cqw, 6cqh); letter-spacing: 0.06em; color: var(--muted); }
+.rt-value { font-size: min(9cqw, 11cqh); font-weight: 600; color: var(--text); white-space: nowrap; }
+.rt-next { display: flex; align-items: center; gap: 3cqw; padding: 1.2cqh 3cqw; margin: 0.6cqh 0; background: rgba(53, 194, 255, 0.1); border-radius: 8px; }
+.rt-next[hidden] { display: none; }
+.rt-arrow { font-size: min(21cqw, 19cqh); line-height: 1; color: var(--accent); flex: none; }
+.rt-words { min-width: 0; }
+.rt-ndist { font-size: min(12cqw, 12.5cqh); font-weight: 700; color: var(--text); line-height: 1.1; }
+.rt-ntext { font-size: min(6.6cqw, 7.4cqh); color: var(--text); overflow-wrap: anywhere; }
+.rt-then { font-size: min(5.4cqw, 6cqh); color: var(--muted); }
+.rt-then[hidden] { display: none; }
+.rt-off { font-size: min(6.5cqw, 8cqh); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; background: var(--warn); border-radius: 6px; padding: 0.6cqh 3cqw; text-align: center; }
+.rt-off[hidden] { display: none; }
+.rt-plan { font-size: min(6.5cqw, 8cqh); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text); background: rgba(53, 194, 255, 0.22); border-radius: 6px; padding: 0.6cqh 3cqw; text-align: center; }
+.rt-plan[hidden] { display: none; }
+.w-route.missing .rt-value, .w-route.missing .rt-dest { color: var(--muted); }
+/* Lap timer: this lap's clock, the gap to the best lap, the last and best laps, and the sectors. */
+.w-lap { container-type: size; display: flex; flex-direction: column; justify-content: center; gap: 1cqh; padding: 2cqh 5cqw; background: var(--panel); border-radius: 12px; }
+.lp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.lp-title { font-size: min(5.5cqw, 6cqh); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-lap { font-size: min(6cqw, 6.5cqh); font-weight: 600; color: var(--text); white-space: nowrap; }
+.lp-time { font-size: min(19cqw, 22cqh); font-weight: 700; line-height: 1.05; color: var(--text); text-align: center; white-space: nowrap; }
+.w-lap.missing .lp-time { font-size: min(9cqw, 10cqh); color: var(--muted); }
+.lp-delta { font-size: min(11cqw, 12cqh); font-weight: 700; text-align: center; min-height: 1.2em; color: var(--muted); }
+.lp-delta.ahead { color: var(--ok); }
+.lp-delta.behind { color: var(--crit); }
+.lp-rows { display: flex; flex-direction: column; }
+.lp-row { display: flex; align-items: baseline; gap: 8px; padding: 0.7cqh 0; border-top: 1px solid rgba(125, 138, 156, 0.18); }
+.lp-label { font-size: min(5cqw, 5.5cqh); letter-spacing: 0.06em; color: var(--muted); }
+.lp-value { margin-left: auto; font-size: min(8.5cqw, 9.5cqh); font-weight: 600; color: var(--text); white-space: nowrap; }
+.lp-value.best { color: #c06bff; }
+.lp-value.invalid { color: var(--muted); text-decoration: line-through; }
+.lp-note { font-size: min(5.5cqw, 6cqh); color: var(--muted); min-width: 3.2em; text-align: right; }
+.lp-sectors { display: flex; gap: 1.5cqw; flex-wrap: wrap; }
+.lp-sec { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; padding: 0.8cqh 0; border-radius: 6px; background: rgba(125, 138, 156, 0.1); }
+.lp-sec.now { outline: 1px solid var(--accent); }
+.lp-sec.best { background: rgba(192, 107, 255, 0.22); }
+.lp-sec-n { font-size: min(4.5cqw, 5cqh); letter-spacing: 0.1em; color: var(--muted); }
+.lp-sec-t { font-size: min(6.5cqw, 7cqh); font-weight: 600; color: var(--text); white-space: nowrap; }
 .w-tripmap { width: 100%; height: 100%; background: var(--panel); border-radius: 10px; overflow: hidden; }
 .tm-frame { display: block; width: 100%; height: 100%; border: 0; }
 body.editing .tm-frame { pointer-events: none; } /* (the editor's frame handles the mouse, not the map inside) */

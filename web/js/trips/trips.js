@@ -11,8 +11,12 @@ import { createWindowReporter, ensureWindowId, readGeometry } from "../windowSta
 import { applySavedPlacement } from "../windowPlace.js";
 import { saveTripsGeometry, tripsGeometry } from "../windows.js";
 import { compareRows, gapSeries, signedDuration } from "./compare.js";
+import { createCircuits } from "./circuits.js";
+import { createRouteView } from "./route.js";
+import { routeSummary } from "./stops.js";
+import { statsCsv, statsCsvName } from "./csv.js";
 import { formatConsumption, formatDuration, formatEnergy, resolveEconomy } from "../economy.js";
-import { RAMP, REPLAY_RATES, advanceLive, interpolateFeed, liveReadout, nextAutoOpen, WHEN_OPTIONS, advanceReplay, clockText, colourScaleTop, filterOptions, filterRoutes, overviewTiles, routesBounds, turnToward, clampMapHeight, mapHeightFor, MAP_STEP_PX, distanceText, graphModel, replayReadout, limitAt, routeRuns, sameTrip, sampleAtDistance, speedText, statTiles, tripTitle, filterTrips, tabTitle, recentTotals, stopText, refuelText, impactText, impactRow, impactDetails, impactsOf, DEFAULT_IMPACT_RULE, waypointRows, lifetimeStats } from "./model.js";
+import { RAMP, REPLAY_RATES, advanceLive, interpolateFeed, liveReadout, nextAutoOpen, WHEN_OPTIONS, advanceReplay, clockText, colourScaleTop, filterOptions, filterRoutes, overviewTiles, routesBounds, turnToward, clampMapHeight, mapHeightFor, MAP_STEP_PX, distanceText, graphModel, replayReadout, limitAt, routeRuns, sameTrip, sampleAtDistance, speedText, statTiles, tripTitle, filterTrips, tabTitle, recentTotals, stopText, refuelText, impactText, impactRow, impactDetails, impactsOf, DEFAULT_IMPACT_RULE, waypointRows, lifetimeStats, DEFAULT_PRESET_TAGS, moneyText, costPer100, addTypedTag, hasTag, knownTags, tagsInUse, toggleTag } from "./model.js";
 
 const LIVE_MS = 3000; // while a trip is being recorded (or open and not finished), the page re-reads it this often
 const IDLE_TICKS = 1; // with nothing being recorded it only looks every IDLE_TICKS * LIVE_MS, to notice a new trip (the list is cheap to read)
@@ -53,7 +57,7 @@ const stored = (key) => {
     return null; // (a page that may not keep anything, such as one shown in a sandbox)
   }
 };
-const state = { trips: [], enabled: true, selected: null, detail: null, client: { local: false }, prefs: buildPrefs({}, location.search), recording: false, query: "", starredOnly: false, picked: new Set(), rule: { ...DEFAULT_IMPACT_RULE } };
+const state = { trips: [], enabled: true, selected: null, detail: null, client: { local: false }, prefs: buildPrefs({}, location.search), recording: false, query: "", starredOnly: false, tag: "", presetTags: DEFAULT_PRESET_TAGS, picked: new Set(), rule: { ...DEFAULT_IMPACT_RULE } };
 const BASE_TITLE = document.title; // (a shared page has its own title; a recording is marked in front of whichever it is)
 let selectSeq = 0; // the newest request to open a trip: an older one that arrives later is dropped, so stepping quickly through the list ends on the last
 let map = null;
@@ -65,7 +69,15 @@ let drawnFor = null;
 let fittedFor = null; // the trip the map has been moved to show (a trip that opens before it has any points is fitted when the first arrive)
 // (OpenStreetMap refuses tile requests with no Referer, and a page opened from a disk sends none: it starts on the satellite picture)
 let currentBase = EMBED && ["sat", "street"].includes(QUERY.get("base")) ? QUERY.get("base") : ["sat", "street"].includes(stored(BASE_KEY)) ? stored(BASE_KEY) : SHARED && location.protocol === "file:" ? "sat" : "street";
-const overview = { map: null, layer: null, base: null, routes: [], filters: { when: "all", vehicle: "", country: "" }, ticks: 0 };
+let circuitsView = null; // the Circuits view (circuits.js), made once the page has started
+let routeView = null; // the Route view (route.js), likewise
+const plan = { state: null, layer: null, key: "" }; // the GPS route now (GET /api/route), and what of it is drawn on the trip's map
+/** Another view is opening (or the trip list is back): the Circuits and Route views step aside. */
+function hideTools() {
+  circuitsView?.hide();
+  routeView?.hide();
+}
+const overview = { map: null, layer: null, base: null, routes: [], filters: { when: "all", vehicle: "", country: "", tag: "" }, ticks: 0 };
 let graphRef = null; // the drawn graph: {g (its geometry), rule (the replay's line on it)}, so the replay can move the line
 const AUTO_KEY = "thrashdash.trips.autoopen";
 let autoOpened = null; // the trip being recorded that the page last moved to (or chose not to), so it moves once per trip
@@ -90,7 +102,7 @@ const when = (ts) => new Date(ts * 1000).toLocaleString(undefined, { dateStyle: 
 // ---- the list --------------------------------------------------------------------------------------------------------
 
 /** What a trip can be found by when searching the list: its name, its vehicle, and its date as shown. */
-const searchText = (trip) => [tripTitle(trip.id === state.selected && state.detail && !trip.stats ? { ...trip, stats: state.detail.stats } : trip), trip.vehicle, when(trip.ts)].join(" ");
+const searchText = (trip) => [tripTitle(trip.id === state.selected && state.detail && !trip.stats ? { ...trip, stats: state.detail.stats } : trip), trip.vehicle, when(trip.ts), ...(trip.tags ?? [])].join(" ");
 
 function renderList() {
   const list = $("list");
@@ -99,8 +111,9 @@ function renderList() {
   for (const id of [...state.picked]) if (!state.trips.some((t) => t.id === id && !t.recording)) state.picked.delete(id); // (a ticked trip that has gone, or is being recorded, is not ticked)
   list.replaceChildren();
   const shown = shownTrips();
-  const searching = Boolean(state.query.trim()) || state.starredOnly;
+  const searching = Boolean(state.query.trim()) || state.starredOnly || Boolean(state.tag);
   $("search").hidden = !state.trips.length;
+  drawTagFilter();
   $("starred-row").hidden = !state.trips.some((t) => t.starred) && !state.starredOnly; // (nothing to filter by until a trip has been starred)
   $("count").textContent = !state.trips.length ? "" : searching ? `${shown.length} of ${state.trips.length}` : `${state.trips.length} ${state.trips.length === 1 ? "trip" : "trips"}`;
   const week = recentTotals(state.trips);
@@ -117,7 +130,7 @@ function renderList() {
       ? "No trips yet. Drive in BeamNG.Earth with ThrashDash running and each drive appears here."
       : "The trip log is switched off in this run of ThrashDash (it is not kept in --simulate mode).";
   } else if (!shown.length) {
-    empty.textContent = state.query.trim() ? "No trip matches that search." : "No trip is starred yet.";
+    empty.textContent = state.query.trim() ? "No trip matches that search." : state.tag ? `No trip has the tag ${state.tag}.` : "No trip is starred yet.";
   }
   for (const trip of shown) {
     const li = h("li", "", list);
@@ -148,6 +161,10 @@ function renderList() {
     if (trip.distance != null) bits.push(distanceString(trip.distance));
     if (trip.duration != null) bits.push(formatDuration(trip.duration));
     h("span", "item-sub muted", b, bits.join(" · "));
+    if (trip.tags?.length) {
+      const tags = h("span", "item-tags", b);
+      for (const t of trip.tags) h("span", "tag-mini", tags, t);
+    }
     if (trip.recording) h("span", "badge", b, "Recording");
     else if (trip.imported) h("span", "badge imported", b, "Imported");
     b.addEventListener("click", () => select(trip.id));
@@ -167,7 +184,8 @@ function updatePicked() {
 }
 
 function shownTrips() {
-  return filterTrips(state.starredOnly ? state.trips.filter((t) => t.starred) : state.trips, state.query, searchText);
+  const base = state.trips.filter((t) => (!state.starredOnly || t.starred) && hasTag(t, state.tag));
+  return filterTrips(base, state.query, searchText);
 }
 
 /** The search box and the arrow keys. Typing narrows the list; Down from the box goes to the first trip; in the list Up and Down
@@ -184,6 +202,10 @@ function wireList() {
   $("sel-delete").addEventListener("click", () => askDelete($("sel-delete")));
   $("starred-only").addEventListener("change", () => {
     state.starredOnly = $("starred-only").checked;
+    renderList();
+  });
+  $("tag-filter").addEventListener("change", () => {
+    state.tag = $("tag-filter").value;
     renderList();
   });
   const search = $("search");
@@ -233,6 +255,7 @@ async function loadList() {
     const data = await api.listTrips();
     state.enabled = data.enabled;
     state.trips = data.trips;
+    state.presetTags = Array.isArray(data.presetTags) && data.presetTags.length ? data.presetTags : DEFAULT_PRESET_TAGS;
     state.recording = Boolean(data.status?.recording);
     const live = $("live");
     live.hidden = !state.recording;
@@ -275,6 +298,7 @@ function show(trip, refit) {
   $("overview").hidden = true;
   $("stats").hidden = true;
   $("compare-view").hidden = true;
+  hideTools();
   $("all").setAttribute("aria-pressed", "false");
   $("stats-btn").setAttribute("aria-pressed", "false");
   $("detail").hidden = false;
@@ -299,6 +323,7 @@ function show(trip, refit) {
   // (but never pull the map back from somewhere the user has moved it to look at).
   if (!trip.end && wasFollowing && !refit && trip.points.length && !map.getBounds().contains(lastLatLng(trip))) map.panTo(lastLatLng(trip));
   drawnFor = id;
+  drawPlanOnMap();
   drawGraph();
   renderReplay(replay.active ? 0 : undefined); // (0: the turn of a heading-up map is not snapped by a refresh)
 }
@@ -307,6 +332,29 @@ const lastLatLng = (trip) => {
   const p = trip.points[trip.points.length - 1];
   return [p.la, p.lo];
 };
+
+/** The Circuits view is opening: whatever else was open steps aside (the view itself does the rest). */
+function leaveForCircuits() {
+  routeView?.hide();
+  leaveViews();
+}
+
+/** The Route view is opening. */
+function leaveForRoute() {
+  circuitsView?.hide();
+  leaveViews();
+}
+
+function leaveViews() {
+  stopReplay();
+  state.selected = null;
+  state.detail = null;
+  drawnFor = null;
+  for (const id of ["detail", "overview", "stats", "compare-view", "placeholder"]) $(id).hidden = true;
+  $("all").setAttribute("aria-pressed", "false");
+  $("stats-btn").setAttribute("aria-pressed", "false");
+  for (const b of $("list").querySelectorAll(".item")) b.setAttribute("aria-current", "false");
+}
 
 function showNothing() {
   stopReplay();
@@ -318,6 +366,7 @@ function showNothing() {
   $("overview").hidden = true;
   $("stats").hidden = true;
   $("compare-view").hidden = true;
+  hideTools();
   $("all").setAttribute("aria-pressed", "false");
   $("stats-btn").setAttribute("aria-pressed", "false");
   $("placeholder").hidden = false;
@@ -340,8 +389,11 @@ function drawHeader() {
   const id = encodeURIComponent(trip.header.id);
   $("export-gpx").href = `/api/triplog/${id}/gpx`;
   $("export-kml").href = `/api/triplog/${id}/kml`;
+  $("export-csv").href = `/api/triplog/${id}/csv`;
   $("export-share").href = `/api/triplog/${id}/share`;
   $("export-share").hidden = !trip.end; // (a trip being recorded is shared once it has ended)
+  drawTags();
+  drawPrice();
 }
 
 const impactPins = new Map(); // impact time -> its marker on the map, so a row in the list can point at it
@@ -482,6 +534,8 @@ function setBase(name) {
     cmp.base = tileLayerFor(name).addTo(cmp.map);
     cmp.base.bringToBack();
   }
+  circuitsView?.setBase(name);
+  routeView?.setBase(name);
   for (const b of document.querySelectorAll(".base button")) b.setAttribute("aria-pressed", String(b.dataset.base === name));
   try {
     localStorage.setItem(BASE_KEY, name);
@@ -658,6 +712,7 @@ function connectFeed() {
       feed.offsets = [];
     }
     feed.samples.push(msg);
+    routeView?.drawCar(); // (the car on the Route view's map follows the live position)
     feed.offsets.push(now - msg.rt);
     if (feed.samples.length > FEED_KEEP) feed.samples.shift();
     if (feed.offsets.length > 30) feed.offsets.shift();
@@ -893,6 +948,7 @@ async function showOverview() {
   $("placeholder").hidden = true;
   $("stats").hidden = true;
   $("compare-view").hidden = true;
+  hideTools();
   $("stats-btn").setAttribute("aria-pressed", "false");
   $("overview").hidden = false;
   $("all").setAttribute("aria-pressed", "true");
@@ -934,6 +990,8 @@ function fillFilters() {
   overview.filters.when = fill("f-when", WHEN_OPTIONS.map((w) => [w.id, w.label]), overview.filters.when);
   overview.filters.vehicle = fill("f-vehicle", [["", "All vehicles"], ...options.vehicles.map((v) => [v, v])], overview.filters.vehicle);
   overview.filters.country = fill("f-country", [["", "All countries"], ...options.countries.map((c) => [c, c])], overview.filters.country);
+  overview.filters.tag = fill("f-tag", [["", "All tags"], ...options.tags.map((t) => [t, t])], overview.filters.tag);
+  $("f-tag").parentElement.hidden = options.tags.length === 0; // (nothing to filter by until a trip has a tag)
 }
 
 function drawOverview(fit) {
@@ -965,7 +1023,7 @@ function drawOverview(fit) {
 function setupOverview() {
   $("all").addEventListener("click", () => (isOverview() ? showNothing() : showOverview()));
   $("ov-back").addEventListener("click", () => showNothing());
-  for (const [id, key] of [["f-when", "when"], ["f-vehicle", "vehicle"], ["f-country", "country"]]) {
+  for (const [id, key] of [["f-when", "when"], ["f-vehicle", "vehicle"], ["f-country", "country"], ["f-tag", "tag"]]) {
     $(id).addEventListener("change", () => {
       overview.filters[key] = $(id).value;
       drawOverview(true);
@@ -979,7 +1037,7 @@ function setupOverview() {
 // It is worked out here from the list the page already has (each trip carries its summary), filtered like the all-trips map.
 
 const isStats = () => document.body.dataset.view === "stats";
-const statsView = { filters: { when: "all", vehicle: "", country: "" }, drawn: null };
+const statsView = { filters: { when: "all", vehicle: "", country: "", tag: "" }, drawn: null, shown: [] };
 
 async function showStats() {
   stopReplay();
@@ -992,6 +1050,7 @@ async function showStats() {
   $("detail").hidden = true;
   $("overview").hidden = true;
   $("compare-view").hidden = true;
+  hideTools();
   $("placeholder").hidden = true;
   $("stats").hidden = false;
   $("all").setAttribute("aria-pressed", "false");
@@ -1019,8 +1078,11 @@ function drawStats() {
   statsView.filters.when = fillSelect("sf-when", WHEN_OPTIONS.map((w) => [w.id, w.label]), statsView.filters.when);
   statsView.filters.vehicle = fillSelect("sf-vehicle", [["", "All vehicles"], ...options.vehicles.map((v) => [v, v])], statsView.filters.vehicle);
   statsView.filters.country = fillSelect("sf-country", [["", "All countries"], ...options.countries.map((c) => [c, c])], statsView.filters.country);
+  statsView.filters.tag = fillSelect("sf-tag", [["", "All tags"], ...options.tags.map((t) => [t, t])], statsView.filters.tag);
+  $("sf-tag").parentElement.hidden = options.tags.length === 0;
   const shown = filterRoutes(withCountries, statsView.filters);
-  const signature = JSON.stringify([statsView.filters, state.prefs, state.rule, shown.map((t) => [t.id, t.title, t.stats?.dist, t.stats?.name])]);
+  statsView.shown = shown; // (what Download as CSV takes: the trips the filters leave)
+  const signature = JSON.stringify([statsView.filters, state.prefs, state.rule, shown.map((t) => [t.id, t.title, t.stats?.dist, t.stats?.name, t.tags, t.price])]);
   if (signature === statsView.drawn) return; // (nothing changed since it was last drawn: leave it alone, so a keyboard focus or a hover is not lost every refresh)
   statsView.drawn = signature;
   const s = lifetimeStats(shown, state.rule);
@@ -1046,6 +1108,15 @@ function drawStats() {
   for (const [unit, used] of Object.entries(s.fuel)) {
     const e = formatEnergy(used, unit === "kWh" ? "electric" : "liquid", economy);
     if (e) tile(unit === "kWh" ? "energy" : "fuel", unit === "kWh" ? "Energy used" : "Fuel used", `${e.value.toFixed(e.value >= 10 ? 0 : 1)} ${e.unit}`);
+  }
+  // What it cost, by currency (a price is saved with each trip, so one that changed currency adds up in each). Trips with no price are left out
+  // and counted, so the total is never mistaken for the whole.
+  for (const c of s.cost.byCurrency) {
+    const per = costPer100({ amount: c.amount }, c.dist, state.prefs);
+    const label = s.cost.byCurrency.length > 1 ? `Fuel cost (${c.currency || "no currency"})` : "Fuel cost";
+    const bits = [`${s.cost.priced} of ${s.cost.fuelTrips} ${s.cost.fuelTrips === 1 ? "trip" : "trips"} priced`];
+    if (per) bits.push(`${moneyText(per.amount, c.currency)} per ${per.per}`);
+    tile("cost", label, moneyText(c.amount, c.currency), bits.join(" \u00B7 "));
   }
 
   const records = $("st-records");
@@ -1110,7 +1181,17 @@ function drawStats() {
 function setupStats() {
   $("stats-btn").addEventListener("click", () => (isStats() ? showNothing() : showStats()));
   $("st-back").addEventListener("click", () => showNothing());
-  for (const [id, key] of [["sf-when", "when"], ["sf-vehicle", "vehicle"], ["sf-country", "country"]]) {
+  $("st-csv").addEventListener("click", () => {
+    const blob = new Blob([statsCsv(statsView.shown, state.rule)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = h("a", "", document.body);
+    a.href = url;
+    a.download = statsCsvName();
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  });
+  for (const [id, key] of [["sf-when", "when"], ["sf-vehicle", "vehicle"], ["sf-country", "country"], ["sf-tag", "tag"]]) {
     $(id).addEventListener("change", () => {
       statsView.filters[key] = $(id).value;
       drawStats();
@@ -1379,6 +1460,7 @@ function drawEditButtons(trip) {
     resetSure($(id), label);
   }
   $("cut").hidden = !finished;
+  $("make-circuit").hidden = !finished || trip.header.imported === "gpx";
   resetSure($("cut"), "Cut here");
   $("compare").hidden = !finished || state.trips.filter((t) => t.ended && t.id !== trip.header.id).length === 0;
   if (finished && state.client.local) loadJoinOptions(trip.header.id);
@@ -1534,6 +1616,7 @@ async function showCompare() {
   document.body.dataset.view = "compare";
   history.replaceState(null, "", "#compare");
   for (const id of ["detail", "overview", "stats", "placeholder"]) $(id).hidden = true;
+  hideTools();
   $("compare-view").hidden = false;
   $("cmp-a").textContent = `${tripTitle(a)} (${when(a.header.ts)})`;
   $("cmp-body").hidden = true;
@@ -1678,6 +1761,187 @@ async function toggleStar() {
   renderList();
 }
 
+// ---- tags ----------------------------------------------------------------------------------------------------------------------
+// Short labels on a trip. The fixed set is offered as buttons that switch on and off; a tag of your own is typed in, and from then on is
+// offered like the others (every tag in use on any trip is a button, so there is no list of tags to keep). Only the computer running
+// ThrashDash changes them, and only on a finished trip; anyone else just sees the ones the trip has.
+
+/** The tag filter above the list: the tags in use. Hidden while no trip has one. */
+function drawTagFilter() {
+  const inUse = tagsInUse(state.trips, state.presetTags);
+  if (state.tag && !inUse.some((t) => t.toLowerCase() === state.tag.toLowerCase())) state.tag = ""; // (the last trip with it lost it)
+  $("tag-filter-row").hidden = inUse.length === 0;
+  const sel = $("tag-filter");
+  const shown = JSON.stringify([inUse, state.tag]);
+  if (sel.dataset.drawn === shown) return; // (the list is redrawn every few seconds: leave an open dropdown alone)
+  sel.dataset.drawn = shown;
+  sel.replaceChildren();
+  h("option", "", sel, "All tags").value = "";
+  for (const t of inUse) h("option", "", sel, t).value = t;
+  sel.value = state.tag;
+}
+
+function drawTags() {
+  const trip = state.detail;
+  const row = $("tag-row");
+  if (!trip) {
+    row.hidden = true;
+    return;
+  }
+  const tags = trip.tags ?? [];
+  const canEdit = state.client.local && Boolean(trip.end) && !SHARED && !EMBED;
+  row.hidden = !canEdit && tags.length === 0;
+  $("tag-form").hidden = !canEdit;
+  const chips = $("tag-chips");
+  chips.replaceChildren();
+  const offered = canEdit ? knownTags(state.trips, state.presetTags, tags) : tags;
+  for (const tag of offered) {
+    const on = tags.some((t) => t.toLowerCase() === tag.toLowerCase());
+    const li = h("li", "", chips);
+    if (!canEdit) {
+      h("span", "tag-chip on", li, tag);
+      continue;
+    }
+    const b = h("button", `tag-chip${on ? " on" : ""}`, li, tag);
+    b.type = "button";
+    b.setAttribute("aria-pressed", String(on));
+    b.addEventListener("click", () => setTags(toggleTag(tags, tag)));
+  }
+  $("tag-note").hidden = true;
+}
+
+function tagNote(text) {
+  const el = $("tag-note");
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+/** Save a trip's tags, then show them (the list, the header row and any filter that offers them). */
+async function setTags(tags) {
+  const trip = state.detail;
+  if (!trip || !trip.end) return;
+  try {
+    const reply = await api.tagTrip(trip.header.id, tags);
+    trip.tags = reply.tags;
+  } catch (e) {
+    tagNote(`Could not change the tags: ${e.message}`);
+    return;
+  }
+  const item = state.trips.find((t) => t.id === trip.header.id);
+  if (item) item.tags = trip.tags;
+  drawTags();
+  renderList();
+  if (isStats()) drawStats();
+}
+
+function setupTags() {
+  $("tag-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const trip = state.detail;
+    if (!trip) return;
+    const input = $("tag-input");
+    const known = knownTags(state.trips, state.presetTags, trip.tags ?? []);
+    const added = addTypedTag(trip.tags ?? [], input.value, known);
+    if (added.error) {
+      tagNote(added.error);
+      return;
+    }
+    input.value = "";
+    await setTags(added.tags);
+  });
+}
+
+// ---- the fuel price: the setting, and a trip's own ------------------------------------------------------------------------------
+// The price of fuel is a setting (per litre, per kWh and the currency) that each trip is given as it starts, so what an old drive cost
+// never changes when the price does. A finished trip's own price can be changed by hand (a trip recorded before there was a price, or one
+// that began with the wrong one). Only the computer running ThrashDash changes them.
+
+const priceFields = (prefix) => ({ liquid: $(`${prefix}-liquid`), electric: $(`${prefix}-electric`), currency: $(`${prefix}-currency`) });
+
+function showPrice(fields, price) {
+  fields.liquid.value = price?.liquid > 0 ? String(price.liquid) : "";
+  fields.electric.value = price?.electric > 0 ? String(price.electric) : "";
+  fields.currency.value = price?.currency ?? "";
+}
+
+/** What was typed, as a price: blank is 0 (no price), and a number that is not one is refused. */
+function readPrice(fields) {
+  const read = (el) => (el.value.trim() === "" ? 0 : Number(el.value));
+  const price = { liquid: read(fields.liquid), electric: read(fields.electric), currency: fields.currency.value.trim() };
+  return Number.isFinite(price.liquid) && Number.isFinite(price.electric) && price.liquid >= 0 && price.electric >= 0 ? price : null;
+}
+
+const priceLine = (price) => {
+  const bits = [];
+  if (price?.liquid > 0) bits.push(`${moneyText(price.liquid, price.currency)} per litre`);
+  if (price?.electric > 0) bits.push(`${moneyText(price.electric, price.currency)} per kWh`);
+  return bits.join(", ");
+};
+
+function setupFuelPrice(settings) {
+  const box = $("price-settings");
+  box.hidden = !state.client.local || EMBED || SHARED;
+  if (box.hidden) return;
+  const fields = priceFields("price");
+  showPrice(fields, settings?.fuelPrice);
+  $("price-save").addEventListener("click", async () => {
+    const price = readPrice(fields);
+    const note = $("price-note");
+    if (!price) {
+      note.textContent = "A price is a number, 0 or more.";
+      return;
+    }
+    try {
+      await api.saveSettings({ fuelPrice: price });
+      note.textContent = priceLine(price) ? `Saved: ${priceLine(price)}. Trips that start from now on are given it; each keeps the price it started with.` : "Saved: no price, so new trips have no cost.";
+    } catch (e) {
+      note.textContent = `Could not save: ${e.message}`;
+    }
+  });
+}
+
+function drawPrice() {
+  const trip = state.detail;
+  const box = $("price-box");
+  box.hidden = !trip || !trip.end || !state.client.local || SHARED || EMBED;
+  if (box.hidden) return;
+  $("price-summary").textContent = trip.price ? `Fuel price for this trip: ${priceLine(trip.price)}` : "Fuel price for this trip: none";
+  showPrice(priceFields("tp"), trip.price ?? settingsLoaded?.fuelPrice);
+  $("tp-note").hidden = true;
+}
+
+async function setTripPrice(price) {
+  const trip = state.detail;
+  if (!trip || !trip.end) return;
+  const note = $("tp-note");
+  try {
+    const reply = await api.priceTrip(trip.header.id, price);
+    trip.price = reply.price;
+  } catch (e) {
+    note.textContent = `Could not change the price: ${e.message}`;
+    note.hidden = false;
+    return;
+  }
+  const item = state.trips.find((t) => t.id === trip.header.id);
+  if (item) item.price = trip.price;
+  drawPrice();
+  drawTiles();
+  if (isStats()) drawStats();
+}
+
+function setupTripPrice() {
+  $("tp-save").addEventListener("click", () => {
+    const price = readPrice(priceFields("tp"));
+    if (!price) {
+      $("tp-note").textContent = "A price is a number, 0 or more.";
+      $("tp-note").hidden = false;
+      return;
+    }
+    setTripPrice(price);
+  });
+  $("tp-remove").addEventListener("click", () => setTripPrice(null));
+}
+
 function startRename() {
   const trip = state.detail;
   const title = $("title");
@@ -1760,6 +2024,58 @@ function labelDelete() {
 
 // ---- start ----------------------------------------------------------------------------------------------------------
 
+// ---- the planned GPS route on the live map -------------------------------------------------------------------------------------
+// BeamNG.Earth plans the route; the relay passes it on (GET /api/route: the line, the destination and the progress). It is drawn on the map of
+// the trip being driven, a dashed line from the car to the destination with a chip saying where to and how far, and goes when the route does.
+// A trip that has ended shows no route: the route is about now.
+
+async function fetchPlan() {
+  try {
+    plan.state = await api.getRoute();
+  } catch {
+    plan.state = null;
+  }
+  drawPlanOnMap();
+  routeView?.drawPlan();
+}
+
+let planBusy = false;
+async function pollPlan() {
+  if (SHARED || planBusy) return;
+  const wanted = routeView?.isOpen() || (state.detail && !state.detail.end);
+  if (!wanted) {
+    if (plan.state) {
+      plan.state = null;
+      drawPlanOnMap();
+    }
+    return;
+  }
+  planBusy = true;
+  try {
+    await fetchPlan();
+  } finally {
+    planBusy = false;
+  }
+}
+
+function drawPlanOnMap() {
+  if (!map) return;
+  plan.layer ??= L.layerGroup().addTo(map);
+  const s = plan.state;
+  const show = Boolean(s?.active && s.points && state.detail && !state.detail.end);
+  const chip = $("route-chip");
+  chip.hidden = !(s?.active && state.detail && !state.detail.end);
+  if (!chip.hidden) chip.textContent = routeSummary(s, state.prefs);
+  const key = show ? `${s.version}:${s.points.length}:${s.dest?.lat}:${s.dest?.lon}` : "";
+  if (key === plan.key) return;
+  plan.key = key;
+  plan.layer.clearLayers();
+  if (!show) return;
+  L.polyline(s.points, { color: "#35c2ff", weight: 4, opacity: 0.85, dashArray: "2 9", lineCap: "round", interactive: false }).addTo(plan.layer);
+  for (const w of s.waypoints ?? []) L.circleMarker([w.lat, w.lon], { radius: 5, color: "#fff", weight: 2, fillColor: "#ffb020", fillOpacity: 1 }).bindTooltip(w.name || "Stop").addTo(plan.layer);
+  if (s.dest) L.circleMarker([s.dest.lat, s.dest.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#ff4d4d", fillOpacity: 1 }).bindTooltip(s.dest.name || "Destination").addTo(plan.layer);
+}
+
 let idleTicks = 0;
 let refreshing = false;
 
@@ -1775,10 +2091,11 @@ async function maybeAutoOpen(allowSwitch) {
 /** Called every LIVE_MS. Does the work only when something is being recorded (or the open trip is unfinished). */
 async function tick() {
   if (SHARED) return; // (a shared page has one finished trip and nothing to refresh)
+  pollPlan(); // (the GPS route, while a live trip or the Route view is open: its own request, so it never holds the trip refresh up)
   if (refreshing) return;
   // Looking for a new trip is cheap, so it goes on even when the window is hidden behind the game; redrawing a trip nobody can see is not.
   const visible = document.visibilityState === "visible";
-  if (isOverview() || isStats() || isCompare()) {
+  if (isOverview() || isStats() || isCompare() || circuitsView?.isOpen() || routeView?.isOpen()) {
     // The all-trips map: a newly recorded trip appears and one being driven grows. It reads every trip, so not as often as a single trip.
     if (!state.recording && ++idleTicks < IDLE_TICKS) return;
     idleTicks = 0;
@@ -1968,12 +2285,23 @@ async function start() {
   setupMapSize();
   setupOverview();
   setupStats();
+  circuitsView = createCircuits({ $, state: () => state, tileLayerFor, currentBase: () => currentBase, when, tripTitle, leave: leaveForCircuits, closed: () => showNothing() });
+  circuitsView.setup();
+  routeView = createRouteView({
+    $, state: () => state, tileLayerFor, currentBase: () => currentBase, when, leave: leaveForRoute, closed: () => showNothing(),
+    plan: () => plan.state, refreshPlan: fetchPlan, carPosition: () => { const here = feedHere(); return here && Number.isFinite(here.lat) ? [here.lat, here.lon] : null; },
+  });
+  routeView.setup();
+  $("make-circuit").addEventListener("click", () => circuitsView.startFromTrip(null, state.selected));
   wireList();
   setupPopups(settingsLoaded);
   setupEarth(settingsLoaded);
   reportAsWindow();
   setupQuit();
   setupEditing();
+  setupTags();
+  setupTripPrice();
+  setupFuelPrice(settingsLoaded);
   setupBackup();
   setupCompare();
   $("star").addEventListener("click", toggleStar);
@@ -1991,6 +2319,10 @@ async function start() {
       if (!isOverview()) showOverview();
     } else if (id === "stats") {
       if (!isStats()) showStats();
+    } else if (id === "circuits") {
+      if (!circuitsView.isOpen()) circuitsView.show();
+    } else if (id === "route") {
+      if (!routeView.isOpen()) routeView.show();
     } else if (id && id !== state.selected) select(id);
   });
   const auto = $("auto-open");
@@ -2014,6 +2346,8 @@ async function start() {
   const wanted = EMBED ? "" : location.hash.slice(1);
   if (wanted === "all") await showOverview();
   else if (wanted === "stats") await showStats();
+  else if (wanted === "circuits") await circuitsView.show();
+  else if (wanted === "route") await routeView.show();
   else if (wanted && state.trips.some((t) => t.id === wanted)) await select(wanted);
   else if (EMBED) {
     const live = state.trips.find((t) => t.recording);
@@ -2031,7 +2365,7 @@ async function start() {
 
 if (QUERY.get("debug") === "1") {
   // (for the tests: where the car marker is drawn, and whether live positions are arriving)
-  globalThis.__tripsDebug = () => ({ center: map ? map.getCenter() : null, selected: state.selected, marker: replay.marker ? replay.marker.getLatLng() : null, feedSamples: feed.samples.length, feedLive: feedHere() !== null, live: replay.live });
+  globalThis.__tripsDebug = () => ({ center: map ? map.getCenter() : null, selected: state.selected, marker: replay.marker ? replay.marker.getLatLng() : null, feedSamples: feed.samples.length, feedLive: feedHere() !== null, live: replay.live, plan: plan.key });
 }
 
 start();

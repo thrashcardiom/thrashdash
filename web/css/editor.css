@@ -155,3 +155,11 @@ body.editing #canvas.no-grid { background-image: none; }
 .al-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .al-dot-crit { background: var(--crit); }
 .al-dot-warn { background: var(--warn); }
+
+/* the box dragged over empty canvas to select what it touches */
+.ed-marquee { position: absolute; border: calc(1px * var(--inv-scale, 1)) dashed var(--accent); background: rgba(53, 194, 255, 0.12); pointer-events: none; }
+
+/* colours (the theme) */
+.pr-colour { display: flex; align-items: center; gap: 8px; }
+.pr-color { width: 44px; height: 28px; padding: 0; border: 1px solid var(--track); border-radius: 6px; background: none; cursor: pointer; }
+.pr-colour .btn.small { margin: 0; }

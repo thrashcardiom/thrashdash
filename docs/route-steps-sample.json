@@ -1,0 +1,102 @@
+{
+ "what": "A real gpsRoute() from BeamNG.Earth API 1.8 (Wellington, 2026-11-21): the route's length in metres and its steps. `offset` is metres along the route where a step begins; the car's progress is dist - gps().remaining (checked against a drive: it matched the steps' positions to within 3-30 m).",
+ "dist": 11659,
+ "steps": [
+  {
+   "distance": 485,
+   "duration": 69.373,
+   "leg": 1,
+   "name": "Hutt Road",
+   "offset": 0,
+   "type": "depart"
+  },
+  {
+   "distance": 810,
+   "duration": 112.405,
+   "leg": 1,
+   "modifier": "slight left",
+   "name": "Aotea Quay",
+   "offset": 485,
+   "type": "fork"
+  },
+  {
+   "distance": 31,
+   "duration": 3.857,
+   "exit": 1,
+   "leg": 1,
+   "name": "",
+   "offset": 1295,
+   "type": "roundabout"
+  },
+  {
+   "distance": 2990,
+   "duration": 424.762,
+   "leg": 1,
+   "name": "Aotea Quay",
+   "offset": 1326,
+   "type": "exit roundabout"
+  },
+  {
+   "distance": 71,
+   "duration": 10.087,
+   "leg": 1,
+   "modifier": "slight left",
+   "name": "Cable Street",
+   "offset": 4316,
+   "type": "fork"
+  },
+  {
+   "distance": 5930,
+   "duration": 661.585,
+   "leg": 1,
+   "modifier": "slight left",
+   "name": "Oriental Parade",
+   "offset": 4387,
+   "type": "turn"
+  },
+  {
+   "distance": 98,
+   "duration": 14.479,
+   "leg": 1,
+   "modifier": "left",
+   "name": "Evans Bay Parade",
+   "offset": 10317,
+   "type": "turn"
+  },
+  {
+   "distance": 698,
+   "duration": 101.099,
+   "leg": 1,
+   "modifier": "slight left",
+   "name": "Rongotai Road",
+   "offset": 10415,
+   "type": "turn"
+  },
+  {
+   "distance": 110,
+   "duration": 16.905,
+   "exit": 2,
+   "leg": 1,
+   "name": "",
+   "offset": 11113,
+   "type": "roundabout"
+  },
+  {
+   "distance": 433,
+   "duration": 41.14,
+   "leg": 1,
+   "name": "SH 1",
+   "offset": 11223,
+   "type": "exit roundabout"
+  },
+  {
+   "distance": 0,
+   "duration": 0,
+   "leg": 1,
+   "modifier": "left",
+   "name": "",
+   "offset": 11656,
+   "type": "arrive"
+  }
+ ]
+}

@@ -5,6 +5,7 @@
 // the spec its widget declares, anything unknown or invalid is dropped, and the result is always a
 // layout the renderer can draw safely. Nothing here (or anywhere) ever evaluates layout content.
 
+import { cleanTheme } from "./theme.js";
 import { scaleSetting } from "./scaling.js";
 
 export const LAYOUT_FORMAT = 1;
@@ -164,7 +165,9 @@ export function sanitizeLayout(raw, specs) {
   }
   const { mode: scaleMode, percent: scalePercent } = scaleSetting(raw);
   if (raw.scaleMode !== undefined && raw.scaleMode !== scaleMode) warnings.push(`scale mode ${JSON.stringify(String(raw.scaleMode).slice(0, 20))} not understood; using "${scaleMode}"`);
-  return { layout: { format: LAYOUT_FORMAT, name: name || "Untitled", width, height, scaleMode, scalePercent, widgets }, warnings };
+  const { theme, warnings: themeWarnings } = cleanTheme(raw.theme);
+  warnings.push(...themeWarnings);
+  return { layout: { format: LAYOUT_FORMAT, name: name || "Untitled", width, height, scaleMode, scalePercent, ...(theme ? { theme } : {}), widgets }, warnings };
 }
 
 /** A new widget of `type` with its default size and properties, placed at (x, y). */

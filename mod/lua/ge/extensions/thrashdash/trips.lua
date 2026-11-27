@@ -48,9 +48,17 @@ local logTag = "thrashdash_trips"
 
 local WEATHER_KEYS = { "code", "tempC", "windMs", "gustMs", "rainMmH", "snowCmH", "visibilityM" }
 local GPS_KEYS = { "remaining", "eta", "off", "routeVersion" }
+local ROUTE_KEYS = { "remaining", "eta", "off", "name", "planning", "routeVersion" } -- what the dashboard's route widget shows, every second
+local STEPS_S = 20 -- the route's steps are sent when the route is set or re-planned, and again this often (a relay started later would miss them)
+local MAX_STEPS = 120
+local MAX_PATH_POINTS = 1500 -- the most points of the route's line sent to the maps (one datagram holds them; the relay takes as many)
+local THIN_FROM_M = 8 -- a longer line is simplified by shape, starting at this tolerance (m) and doubling until it fits
+local MAX_STOPS = 11 -- what BeamNG.Earth's gpsSetRoute takes: up to 10 stops on the way and the destination
+local STEP_KEYS = { "type", "modifier", "name" } -- text kept (cut short); "exit", "offset" and "distance" are numbers
 
 local udp
 local clock = 0 -- seconds of real time since this extension loaded
+local simClock = 0 -- seconds of GAME time since it loaded: stands still while the game is paused, and runs slower in slow motion (lap times use it)
 local sampleT, infoT, placeT, slowT, liveT = 0, 0, 0, 0, 0
 local counter = 0
 local sent, failed = 0, 0
@@ -171,7 +179,121 @@ local function takeLive()
   if not a or call(a.ready) ~= true then return end
   local pose = call(a.pose)
   if type(pose) ~= "table" or not pose.lat or not pose.lon or pose.camera then return end
-  send({ type = "geolive", rt = clock, lat = pose.lat, lon = pose.lon, hdg = pose.heading, spd = pose.speed })
+  send({ type = "geolive", rt = clock, st = simClock, lat = pose.lat, lon = pose.lon, hdg = pose.heading, spd = pose.speed })
+end
+
+-- The steps of the route (turn here, roundabout exit 2...) for the dashboard's "next turn". Each step is {type, modifier, name, exit, offset, distance}
+-- (BeamNG.Earth API 1.8: type is "depart", "turn", "fork", "roundabout", "exit roundabout", "arrive"... as a routing service names them; offset is
+-- the metres along the route where the step begins). Only what the widget reads is sent, with text cut short: a route can have hundreds.
+local stepsVersion, stepsAt = nil, -1000
+
+local function placeOf(item)
+  if type(item) == "table" and type(item.lat) == "number" and type(item.lon) == "number" then
+    return { lat = item.lat, lon = item.lon, name = type(item.name) == "string" and item.name:sub(1, 60) or nil }
+  end
+end
+
+-- The points of a line that shape it: those within `tol` metres of the straight line between their kept neighbours are dropped
+-- (Ramer-Douglas-Peucker, as BeamNG.Earth simplifies its own). x and y are the points in metres; the ends are always kept.
+local function simplify(points, x, y, tol)
+  local n = #points
+  local keep = { [1] = true, [n] = true }
+  local stack = { { 1, n } }
+  while #stack > 0 do
+    local span = table.remove(stack)
+    local a, b = span[1], span[2]
+    local ax, ay = x[a], y[a]
+    local dx, dy = x[b] - ax, y[b] - ay
+    local len2 = dx * dx + dy * dy
+    local far, at = tol * tol, nil
+    for i = a + 1, b - 1 do
+      local px, py = x[i] - ax, y[i] - ay
+      local t = len2 > 0 and math.max(0, math.min(1, (px * dx + py * dy) / len2)) or 0
+      local d = (px - t * dx) ^ 2 + (py - t * dy) ^ 2
+      if d > far then far, at = d, i end
+    end
+    if at then
+      keep[at] = true
+      stack[#stack + 1] = { a, at }
+      stack[#stack + 1] = { at, b }
+    end
+  end
+  local out = {}
+  for i = 1, n do
+    if keep[i] then out[#out + 1] = points[i] end
+  end
+  return out
+end
+
+-- At most MAX_PATH_POINTS of the line. Never every Nth point: BeamNG.Earth's line has points only where the road turns, so skipping
+-- some by count cuts the bends. A line that is too long loses the points that matter least to its shape instead.
+local function thin(points)
+  if #points <= MAX_PATH_POINTS then return points end
+  local metres = 111320
+  local across = metres * math.cos(math.rad(points[1][1]))
+  local x, y = {}, {}
+  local lon, previous = points[1][2], points[1][2]
+  for i, p in ipairs(points) do
+    lon = lon + ((p[2] - previous + 180) % 360 - 180) -- (the short way across the date line)
+    previous = p[2]
+    x[i], y[i] = lon * across, p[1] * metres
+  end
+  local tol, out = THIN_FROM_M, nil
+  repeat
+    out = simplify(points, x, y, tol)
+    tol = tol * 2
+  until #out <= MAX_PATH_POINTS
+  return out
+end
+
+local thinned = {} -- the last route's line, so a long one is simplified once and not at every resend
+
+local function lineOf(version, source)
+  local first, last = source[1], source[#source]
+  local key = table.concat({ tostring(version), #source, tostring(first and first[1]), tostring(first and first[2]),
+    tostring(last and last[1]), tostring(last and last[2]) }, " ")
+  if thinned.key ~= key then
+    local points = {}
+    for i = 1, #source do
+      local p = source[i]
+      if type(p) == "table" and type(p[1]) == "number" and type(p[2]) == "number" then points[#points + 1] = { p[1], p[2] } end
+    end
+    thinned = { key = key, points = thin(points) }
+  end
+  return thinned.points
+end
+
+-- The planned route, for the dashboards and the maps (once per route, and now and then again): its line as [lat, lon] pairs, the
+-- destination, the stops still ahead, and the steps (above). One read of gpsRoute() serves both packets.
+local function sendRoute(a, gps)
+  local version = gps.routeVersion
+  stepsVersion, stepsAt = version, clock
+  local route = call(a.gpsRoute)
+  if type(route) ~= "table" then return end
+  if type(route.points) == "table" and #route.points >= 2 then
+    local points = lineOf(version, route.points)
+    local waypoints = {}
+    if type(gps.waypoints) == "table" then
+      for i = 1, math.min(#gps.waypoints, MAX_STOPS) do
+        local w = placeOf(gps.waypoints[i])
+        if w then waypoints[#waypoints + 1] = w end
+      end
+    end
+    if #points >= 2 then send({ type = "georoutepath", rt = clock, version = version, points = points, dest = placeOf(gps), waypoints = waypoints }) end
+  end
+  if type(route.steps) ~= "table" then return end
+  local steps = {}
+  for i = 1, math.min(#route.steps, MAX_STEPS) do
+    local step = route.steps[i]
+    if type(step) == "table" and type(step.offset) == "number" then
+      local out = { offset = step.offset, distance = type(step.distance) == "number" and step.distance or nil, exit = type(step.exit) == "number" and step.exit or nil }
+      for _, key in ipairs(STEP_KEYS) do
+        if type(step[key]) == "string" then out[key] = step[key]:sub(1, 60) end
+      end
+      steps[#steps + 1] = out
+    end
+  end
+  send({ type = "geosteps", rt = clock, version = version, dist = type(route.dist) == "number" and route.dist or nil, steps = steps })
 end
 
 local function takeInfo(withPlace, withSlow)
@@ -184,6 +306,16 @@ local function takeInfo(withPlace, withSlow)
     packet.gps = pick(call(a.gps), GPS_KEYS)
   end
   send(packet)
+  -- The route's progress for the dashboard, every second (the trip log keeps its own, slower reading above). A separate packet, so
+  -- the trip log is not written to more often; and one that says "no route" when there is none, because for the dashboard silence
+  -- would be ambiguous.
+  local gps = call(a.gps)
+  send({ type = "georoute", rt = clock, gps = pick(gps, ROUTE_KEYS) })
+  if type(gps) == "table" and gps.routeVersion ~= nil then
+    if gps.routeVersion ~= stepsVersion or clock - stepsAt >= STEPS_S then sendRoute(a, gps) end
+  else
+    stepsVersion = nil -- no route: the next one's steps are sent at once
+  end
 end
 
 local function sendEvent(name)
@@ -207,6 +339,40 @@ local function toast(title, msg, kind, seconds)
 end
 
 -- Whatever the relay has sent back since last time. Only the relay's own address is believed, and only a "toast" of plain text.
+-- ThrashDash (the Trips page's Route view) can ask the game to set or clear the GPS route. Only the relay's own address is believed, and
+-- only plain places in range. The answer goes back as a `georouteack`, so the page can say whether it worked.
+local function ack(ok, why)
+  send({ type = "georouteack", rt = clock, ok = ok == true, why = type(why) == "string" and why:sub(1, 120) or nil })
+end
+
+local function applyRoute(msg)
+  local a = earth()
+  if not a then return ack(false, "BeamNG.Earth's level is not loaded") end
+  if msg.action == "clear" then
+    call(a.gpsClear)
+    return ack(true)
+  end
+  if msg.action ~= "set" or type(msg.stops) ~= "table" or #msg.stops < 1 or #msg.stops > MAX_STOPS then return ack(false, "not a route") end
+  local stops = {}
+  for i = 1, #msg.stops do
+    local stop = placeOf(msg.stops[i])
+    if not stop or stop.lat < -90 or stop.lat > 90 or stop.lon < -180 or stop.lon > 180 then return ack(false, "a stop is not a place") end
+    stops[i] = stop
+  end
+  local ok, result, why
+  if #stops == 1 then
+    ok, result, why = pcall(a.gpsSet, stops[1].lat, stops[1].lon, stops[1].name)
+  else
+    ok, result, why = pcall(a.gpsSetRoute, stops)
+  end
+  if not ok then return ack(false, "BeamNG.Earth refused: " .. tostring(result)) end
+  if result == true then
+    log("I", logTag, "route set by ThrashDash: " .. #stops .. " stop(s)")
+    return ack(true)
+  end
+  return ack(false, type(why) == "string" and why or "BeamNG.Earth did not take the route")
+end
+
 local function receiveMessages()
   if not udp then return end
   for _ = 1, MAX_PER_FRAME do
@@ -214,7 +380,9 @@ local function receiveMessages()
     if not ok or type(data) ~= "string" then return end
     if ip == ADDRESS and port == PORT then
       local decoded = call(jsonDecode, data)
-      if type(decoded) == "table" and decoded.type == "toast" and type(decoded.msg) == "string" then
+      if type(decoded) == "table" and decoded.type == "route" then
+        pcall(applyRoute, decoded)
+      elseif type(decoded) == "table" and decoded.type == "toast" and type(decoded.msg) == "string" then
         local title = type(decoded.title) == "string" and decoded.title or "ThrashDash"
         local seconds = tonumber(decoded.seconds)
         if seconds then seconds = math.min(MAX_SECONDS, math.max(MIN_SECONDS, seconds)) end
@@ -227,10 +395,11 @@ local function receiveMessages()
   end
 end
 
-function M.onUpdate(dtReal)
+function M.onUpdate(dtReal, dtSim)
   local dt = tonumber(dtReal) or 0
   if dt <= 0 then return end
   clock = clock + dt
+  simClock = simClock + (tonumber(dtSim) or dt) -- (a caller that gives no game time is taken to run in real time)
   receiveMessages()
   sampleT, infoT, placeT, slowT, liveT = sampleT + dt, infoT + dt, placeT + dt, slowT + dt, liveT + dt
   if liveT >= LIVE_S then
