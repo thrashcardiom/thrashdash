@@ -74,7 +74,7 @@ If a data folder from an earlier name of this program exists and this one does n
 The AppImage and the source take the same options:
 
 ```sh
-./ThrashDash-0.1.0-x86_64.AppImage [options]                  # the AppImage
+./ThrashDash-0.1.3-x86_64.AppImage [options]                  # the AppImage
 .venv/bin/python relay/run.py [options]                       # from the source (Windows: .venv\Scripts\python relay\run.py)
 ```
 

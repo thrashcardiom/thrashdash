@@ -18,7 +18,7 @@
 - **No accounts and no cloud.** Everything runs on your computer. The one thing that uses the internet is the map pictures (OpenStreetMap, or EOX's satellite picture); nothing about your trips is sent anywhere.
 
 > [!NOTE]
-> ThrashDash is at version 0.1.0. It has been developed and tested against BeamNG.drive 0.40.5 and BeamNG.Earth 1.9 on Linux. The Windows build has been compiled and run once on Windows 11 and worked, but has had much less use than the Linux one (see [Known limitations](#known-limitations)).
+> ThrashDash is at version 0.1.3. It has been developed and tested against BeamNG.drive 0.40.5 and BeamNG.Earth 1.9 on Linux. The Windows build has been compiled and run once on Windows 11 and worked, but has had much less use than the Linux one (see [Known limitations](#known-limitations)).
 
 ## Contents
 
@@ -87,14 +87,14 @@ The AppImage is one file that contains the program, Python and the pages. Thrash
 1. Download `ThrashDash-<version>-x86_64.AppImage` from the project's [Releases page](https://github.com/thrashcardiom/thrashdash/releases). Each release lists the file's SHA-256 checksum; to check your download matches it:
 
    ```sh
-   sha256sum ThrashDash-0.1.0-x86_64.AppImage
+   sha256sum ThrashDash-0.1.3-x86_64.AppImage
    ```
 
 2. Make the file executable (once), then run it:
 
    ```sh
-   chmod +x ThrashDash-0.1.0-x86_64.AppImage
-   ./ThrashDash-0.1.0-x86_64.AppImage
+   chmod +x ThrashDash-0.1.3-x86_64.AppImage
+   ./ThrashDash-0.1.3-x86_64.AppImage
    ```
 
    Or double-click it in your file manager. A window opens by itself.
@@ -102,7 +102,7 @@ The AppImage is one file that contains the program, Python and the pages. Thrash
 3. Install the mod into the game, with one command (the mod is inside the AppImage):
 
    ```sh
-   ./ThrashDash-0.1.0-x86_64.AppImage --install-mod
+   ./ThrashDash-0.1.3-x86_64.AppImage --install-mod
    ```
 
    It looks for BeamNG.drive's user folder by itself. If it cannot find it, name the folder: `--install-mod /path/to/BeamNG.drive` (in the game launcher, **Manage User Folder** opens it). It never replaces a link, and it only replaces an earlier *copy* of the mod, never a folder it does not recognise. A copy installed under an earlier name of this program is removed too, otherwise the game would load both and every packet would be sent twice.
@@ -114,7 +114,7 @@ Things to know about the AppImage:
 - **It quits by itself** when you close the last window, and there is a **Quit** button next to **Edit** (move the mouse over a dashboard window and it appears). (Phones looking at the pages do not keep it running.) If no window ever opens, it quits after about a minute and a half rather than running unseen.
 - **Messages** go to `thrashdash.log` in [the data folder](docs/reference.md#where-things-are-stored) when it is started from a desktop (only the latest run is kept), and to the terminal when started from one.
 - **No Chromium-based browser?** ThrashDash opens your default browser instead. It works there too, in an ordinary window rather than a borderless one.
-- It needs FUSE to run, like all AppImages. If it will not start, try `./ThrashDash-0.1.0-x86_64.AppImage --appimage-extract-and-run`, or install FUSE 2 (`libfuse2`).
+- It needs FUSE to run, like all AppImages. If it will not start, try `./ThrashDash-0.1.3-x86_64.AppImage --appimage-extract-and-run`, or install FUSE 2 (`libfuse2`).
 - To update, replace the file and run `--install-mod` again if the release notes say the mod changed.
 
 ### Option B: the Windows zip
@@ -198,7 +198,7 @@ py -m venv .venv
 Try it without the game first. The simulator drives a fake car through gears, braking, tyre punctures and damage, so every dashboard comes alive (it keeps no trips):
 
 ```sh
-./ThrashDash-0.1.0-x86_64.AppImage --simulate                 # the AppImage
+./ThrashDash-0.1.3-x86_64.AppImage --simulate                 # the AppImage
 .venv/bin/python relay/run.py --simulate                      # from the source (Windows: .venv\Scripts\python relay\run.py --simulate)
 ```
 
@@ -552,7 +552,7 @@ ThrashDash is released under the MIT licence: **Copyright (c) 2026 Thrash Cardio
 The packaged program (the AppImage) also contains other people's software: Python, its libraries, and the bundled fonts. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists all of it with each licence, and the complete licence texts travel inside the AppImage. To read them:
 
 ```sh
-./ThrashDash-0.1.0-x86_64.AppImage --appimage-extract 'usr/share/licenses/*'   # unpacks to ./squashfs-root/usr/share/licenses/thrashdash/
+./ThrashDash-0.1.3-x86_64.AppImage --appimage-extract 'usr/share/licenses/*'   # unpacks to ./squashfs-root/usr/share/licenses/thrashdash/
 ```
 
 The notices file and that folder are generated during the build by [`packaging/collect_licenses.py`](packaging/collect_licenses.py) from what was actually bundled, so they cannot drift from the program. If a build includes a native library the script does not know, the build stops and says which, so nothing is shipped without its licence.
