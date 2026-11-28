@@ -244,6 +244,9 @@ ROUTE_STEPS = [
 ]
 
 
+SIM_STOP_M = 1800.0  # how far along the simulated route its stop is
+
+
 def make_geo(t):
     """The world packets (limit, route progress, and now and then the route's steps), once a second, in the shape trips.lua sends them. The route is set for the
     first 30 s of each minute and then cleared, with a short spell off the route."""
@@ -258,6 +261,8 @@ def make_geo(t):
         left = ROUTE_LENGTH_M - cycle * 120
         route["gps"] = {"remaining": left, "eta": left / 14.0, "off": 35.0 if 12 < cycle < 16 else 0.0, "name": "Oriental Bay", "planning": False,
                         "routeVersion": 1 + int(t // 60)}
+        if ROUTE_LENGTH_M - left < SIM_STOP_M:  # a stop on the way, until the simulated car has passed it
+            route["gps"]["stops"] = {"ahead": 1, "name": "Evans Bay Fuel", "legs": [[SIM_STOP_M, SIM_STOP_M / 14.0], [ROUTE_LENGTH_M - SIM_STOP_M, (ROUTE_LENGTH_M - SIM_STOP_M) / 14.0]]}
         if int(cycle) % 20 == 0:  # the steps come when the route appears and now and then after, like trips.lua
             packets.append({"v": PROTOCOL_VERSION, "type": "geosteps", "rt": t, "version": 1 + int(t // 60), "dist": ROUTE_LENGTH_M, "steps": ROUTE_STEPS})
     return tuple(packets)

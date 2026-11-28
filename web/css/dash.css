@@ -281,6 +281,11 @@ body.editing #trip-notice { display: none; }
 .rt-off[hidden] { display: none; }
 .rt-plan { font-size: min(6.5cqw, 8cqh); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text); background: rgba(53, 194, 255, 0.22); border-radius: 6px; padding: 0.6cqh 3cqw; text-align: center; }
 .rt-plan[hidden] { display: none; }
+.rt-stop { padding: 0.8cqh 3cqw; margin: 0.4cqh 0; border-left: 3px solid var(--warn); }
+.rt-stop[hidden] { display: none; }
+.rt-stop-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.rt-stop-text { font-size: min(6.4cqw, 7cqh); font-weight: 700; color: var(--text); white-space: nowrap; }
+.rt-stop-name { font-size: min(5.8cqw, 6.4cqh); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .w-route.missing .rt-value, .w-route.missing .rt-dest { color: var(--muted); }
 /* Lap timer: this lap's clock, the gap to the best lap, the last and best laps, and the sectors. */
 .w-lap { container-type: size; display: flex; flex-direction: column; justify-content: center; gap: 1cqh; padding: 2cqh 5cqw; background: var(--panel); border-radius: 12px; }

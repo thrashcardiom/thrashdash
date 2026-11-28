@@ -88,6 +88,11 @@ const GEO = {
   "geo.route.name": ["Route: destination", null],
   "geo.route.planning": ["Route: being planned", null],
   "geo.route.replanning": ["Route: re-routing", null],
+  "geo.route.stop.distance": ["Next stop: distance", "distance"],
+  "geo.route.stop.eta": ["Next stop: time to it (seconds)", null],
+  "geo.route.stop.name": ["Next stop: name", null],
+  "geo.route.stop.number": ["Next stop: which on the route", null],
+  "geo.route.stop.ahead": ["Stops still ahead before the destination", null],
 };
 
 // ---- lap timing (kept by the relay, from the car's position and the circuits drawn on the Trips page) --------------------------

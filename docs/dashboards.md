@@ -75,11 +75,14 @@ These are ordinary dashboards that ship with ThrashDash. They are read-only: use
 | **Vehicle health** | Tyres, body damage, brake temperatures and engine warning lamps. |
 | **Driver inputs and G-force** | Steering wheel, pedals, a G-force meter, speed, gear and rpm. |
 | **Trip computer** | Trips A and B with speed, gear, fuel and temperature. |
+| **Navigation** | The live map, the route panel with the next turn, the speed limit sign, speed, gear, fuel and lamps. The map, route and limit need [BeamNG.Earth](../README.md#planning-a-gps-route). |
+| **Track day (lap timing)** | The lap timer, tachometer with shift light, gear, G-force, speed and pedal bars. Laps need BeamNG.Earth and a [circuit](../README.md#lap-and-sector-timing). |
 
 | | |
 |:---|:---|
 | ![Vehicle health](screenshots/health.png) | ![Driver inputs and G-force](screenshots/driver.png) |
 | ![Trip computer](screenshots/trip.png) | ![Drift / track in the Backlit look](templates/drift-backlit.png) |
+| ![Navigation](screenshots/navigation.png) | ![Track day](screenshots/trackday.png) |
 
 
 ## The editor
@@ -329,12 +332,15 @@ The speed limit of the road the car is on, drawn as a road sign: **round** with 
 
 Progress along the GPS route set in BeamNG.Earth: the destination, the **arrival time** (your computer's clock), the **time left** and the **distance left** (in your distance unit), and an "Off the route" warning when the car is more than 50 m from it. While BeamNG.Earth is planning it says **"Re-routing…"** (a new route for one you already had, as after a wrong turn) or "Planning route…" (the first one), for at least 3 seconds, in place of the warning. Earth plans again by itself once you are more than about 120 m off the route or driving back along it, and no more than once every 20 seconds. There is also an optional [alert](#alerts) for leaving the route. With no route set it says "No route set" and dims, so a dashboard that has this widget still looks right on a drive without one.
 
+While there is a stop on the way before the destination, a **Next stop** block shows its name (or its number on the route), how far it is along the route and when you reach it.
+
 At the top it shows the **next turn**: an arrow, how far away it is (in your distance unit: `300 m`, `1.2 km`, or `250 ft`, `0.4 mi`, and "Now" when it is here), and in words: "Turn left onto Oriental Parade", "Keep left at the fork onto Aotea Quay", "At the roundabout take the 2nd exit onto Evans Bay Parade", "Arrive: your destination is on the left". A second maneuver that comes within 300 m after it is added as a quieter "then ..." line. A maneuver stays shown until the car is about 15 m past it. It needs a BeamNG.Earth app new enough to send a route's steps (the API's `routeSteps`); with an older one the rest of the panel works and the next turn is simply not shown. After a wrong turn the steps of the old route are never used: the next turn comes back when the new route's steps arrive. Layout type: `route`. Default size 300 × 340.
 
 | Property | Type | What it does | Values |
 |:---|:---|:---|:---|
 | `label` | text | Title | up to 20 characters |
 | `showNext` | on/off | The next turn | default on |
+| `showStop` | on/off | The next stop on the way | default on |
 | `showName` | on/off | The destination | default on |
 | `showOff` | on/off | The off-route warning | default on |
 
@@ -402,7 +408,7 @@ A **channel** is one named value from the game: `rpm`, `wheelspeed`, `tire.FL.te
 | **Component states** | 4 per second | `state.<group>.<name>`, what the game's damage tracker reports (only those the current car has) | `state.engine.oilOverheating`, `state.engine.coolantOverheating` |
 | **Energy kind** | 4 per second | `energy.electric`, `energy.liquid` | whether the car has a battery, a fuel tank, or both |
 | **Trip computer** | every frame | `trip.A.*`, `trip.B.*` and `trip.energyKind`, kept by the relay | `trip.A.distance`, `trip.B.consumption`, `trip.A.range` |
-| **Road and route** | every second | `geo.limit` (m/s) and `geo.limitPosted`, only while a limit is known; `geo.route.active`, and while a route is set `geo.route.remaining` (m), `.eta` (s), `.off` (m), `.name`, `.planning` (a route is being planned, or just was) and `.replanning` (it replaces one you already had); and, when the route's steps are known, the next maneuver: `geo.route.next.distance` (m), `.type`, `.modifier`, `.street`, `.exit` (a roundabout's exit number) and the one after it: `geo.route.then.gap` (m after the next one), `.type`, `.modifier`, `.street`, `.exit`. From BeamNG.Earth; each is dropped if the game goes quiet for 4 seconds, so a stale limit can never show or alert. | `geo.limit`, `geo.route.remaining` |
+| **Road and route** | every second | `geo.limit` (m/s) and `geo.limitPosted`, only while a limit is known; `geo.route.active`, and while a route is set `geo.route.remaining` (m), `.eta` (s), `.off` (m), `.name`, `.planning` (a route is being planned, or just was) and `.replanning` (it replaces one you already had); while there is a stop before the destination, `geo.route.stop.distance` (m), `.eta` (s), `.name`, `.number` (which stop of the route) and `.ahead` (how many are still to come); and, when the route's steps are known, the next maneuver: `geo.route.next.distance` (m), `.type`, `.modifier`, `.street`, `.exit` (a roundabout's exit number) and the one after it: `geo.route.then.gap` (m after the next one), `.type`, `.modifier`, `.street`, `.exit`. From BeamNG.Earth; each is dropped if the game goes quiet for 4 seconds, so a stale limit can never show or alert. | `geo.limit`, `geo.route.remaining` |
 | **Lap timing** | with every live position (ten a second) | `lap.active`, `lap.circuit`, `lap.number`, `lap.time`, `lap.delta` (s, + is behind your best), `lap.sector`, `lap.sectors`, `lap.best`, `lap.last`, `lap.lastValid`, `lap.lastDelta`, `lap.lastIsBest`, and per sector `lap.s1.last`, `.best`, `.isBest` (up to nine sectors). Worked out by the relay (`laps.py`); each is dropped if no position has arrived for two seconds. | `lap.time`, `lap.delta`, `lap.s2.last` |
 
 Channels carry numbers, booleans or short text. Lists and other structures are skipped, and `NaN` or infinity are dropped.
@@ -434,7 +440,7 @@ Facts about the game's data that ThrashDash handles for you, found by measuring 
 
 ### Alerts
 
-A banner across every dashboard (also on phones) when the game reports a problem. Alerts show at once and linger for a couple of seconds after the condition clears, so a flickering flag does not make the banner blink. Switching an alert off clears it immediately. Most follow the game's own flags rather than a threshold of ours. It is banner only: no sound.
+A banner across every dashboard (also on phones) when the game reports a problem. Alerts show at once and linger for a couple of seconds after the condition clears, so a flickering flag does not make the banner blink. Switching an alert off clears it immediately. Most follow the game's own flags rather than a threshold of ours. An [alert sound](#alert-sound) can be switched on as well.
 
 | Alert | Level | When |
 |:---|:---|:---|

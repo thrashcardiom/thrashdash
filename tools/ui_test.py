@@ -1069,9 +1069,9 @@ async def scenarios(b, shots):
 
     print("\n== all templates, in the flat look and in a skin")
     await b.resize(1500, 800)
-    expected = {"cluster": 18, "drift": 15, "driver": 10, "health": 20, "minimal": 11, "offroad": 18, "phone": 12, "telemetry": 11, "trip": 6}
+    expected = {"cluster": 18, "drift": 15, "driver": 10, "health": 20, "minimal": 11, "offroad": 18, "phone": 12, "telemetry": 11, "trip": 6, "navigation": 10, "trackday": 12}
     listed = [x["id"] for x in api("GET", "/api/layouts")["layouts"] if x["builtin"]]
-    check("the built-in list is the default plus the seven templates", listed == ["default"] + sorted(expected), str(listed))
+    check("the built-in list is the default plus the templates", listed == ["default"] + sorted(expected), str(listed))
     for tid, count in expected.items():
         for skin in ("clean", "backlit"):
             api("PUT", "/api/settings", {"skins": {tid: skin}})
@@ -1218,8 +1218,11 @@ async def scenarios(b, shots):
     def trip_values():
         return b.eval("[...document.querySelectorAll('#widgets .w-trip')].map(w => [...w.querySelectorAll('.tr-value')].map(e => e.textContent))")
     v1 = await trip_values()
-    await asyncio.sleep(2.5)
-    v2 = await trip_values()
+    for _ in range(40):  # (the simulated car stands still for six seconds of every forty: wait until it is moving again)
+        await asyncio.sleep(0.5)
+        v2 = await trip_values()
+        if v2[0][0] != v1[0][0] and v2[0][1] != v1[0][1]:
+            break
     check("the distance and time count up with the simulated driving", v1[0][0] != v2[0][0] and v1[0][1] != v2[0][1], f"{v1[0][:2]} -> {v2[0][:2]}")
     check("distance is in km and speeds in km/h by default", v2[0][0].endswith(" km") and v2[0][2].endswith(" km/h") and v2[0][3].endswith(" km/h"), str(v2[0]))
     check("the simulated petrol car shows litres and L/100 km", " L" in v2[0][4] and v2[0][5].endswith("L/100 km") and v2[0][6].endswith(" km"), str(v2[0][4:]))
@@ -1359,6 +1362,14 @@ async def scenarios(b, shots):
             break
         await asyncio.sleep(0.5)
     check("the route panel shows the destination, the arrival time and what is left", route[-1] == "Oriental Bay" and ":" in route[0] and route[1].endswith("min") and route[2].endswith("km"), str(route))
+    stop = None
+    for _ in range(150):  # (the simulator's stop is there for the first part of each route, once a minute)
+        stop = await b.eval("(() => { const n = document.querySelector('.rt-stop'); return n && !n.hidden ? [n.querySelector('.rt-stop-name').textContent, n.querySelector('.rt-stop-text').textContent] : null; })()")
+        if stop:
+            break
+        await asyncio.sleep(0.5)
+    check("the route panel shows the next stop on the way: its name, how far and when", stop is not None and stop[0] == "Evans Bay Fuel" and re.fullmatch(r"\d+(\.\d)? km \u00b7 \d{1,2}:\d\d.*", stop[1]) is not None, str(stop))
+    await p.shot("route-next-stop")
     nxt = None
     for _ in range(40):
         nxt = await b.eval("(() => { const n = document.querySelector('.rt-next'); return n && !n.hidden ? [n.querySelector('.rt-arrow').textContent, n.querySelector('.rt-ndist').textContent, n.querySelector('.rt-ntext').textContent] : null; })()")
@@ -2688,6 +2699,10 @@ async def trips_scenario(b, p):
                         while True:
                             msg = json.loads(self.sock.recv(65535))
                             self.received.append(msg)
+                            if msg.get("type") == "places":
+                                self.send({"type": "geofuel", "id": msg["id"], "lat": CAR[0], "lon": CAR[1], "done": True, "places": [
+                                    {"n": "Far Fuel <b>x</b>", "kind": "fuel", "lat": CAR[0] + 0.02, "lon": CAR[1]}, {"n": "Near Charger", "kind": "charger", "lat": CAR[0] + 0.006, "lon": CAR[1]}]})
+                                continue
                             if msg.get("action") == "clear":
                                 self.stops = None
                                 self.send({"type": "georouteack", "ok": True})
@@ -2779,6 +2794,28 @@ async def trips_scenario(b, p):
             await p.shot("route-on-live-map")
             fake.send({"type": "geoevent", "name": "levelEnd", "rt": 7100.0, "ts": 1795400100})
             await p.settle(2.0)
+            # -- fuel and chargers nearby, one of them put first on the route
+            await b.goto(base + "/trips?debug=1#route", wait=3.0)  # (a fresh Route view: no stops of its own, the route set in the game)
+            in_game = len(fake.stops)
+            check("the Route view offers a search for fuel nearby", await b.eval("document.getElementById('rv-fuel-section').hidden") is False)
+            await b.eval("document.getElementById('rv-fuel-find').click()")
+            await p.settle(1.5)
+            names = await b.eval("[...document.querySelectorAll('.rv-found-name')].map(e => e.textContent)")
+            what = await b.eval("[...document.querySelectorAll('.rv-found-what')].map(e => e.textContent)")
+            check("the places found are listed nearest first, with what they are and how far", names == ["Near Charger", "Far Fuel <b>x</b>"] and what[0].startswith("Charger \u00b7 0.7 km") and what[1].startswith("Fuel \u00b7 2.2 km"), f"{names} {what}")
+            check("a place's name is plain text", await b.eval("document.querySelectorAll('#rv-fuel b').length") == 0)
+            before = await b.eval("__routeDebug.stops()")
+            await b.eval("document.querySelector('.rv-found button').click()")
+            await p.settle(0.5)
+            after = await b.eval("__routeDebug.stops()")
+            check("Add as next stop puts it before what is left of the game's route, and says to send", before == [] and after[0].get("name") == "Near Charger" and len(after) == in_game + 1 and "Send to the game" in await p.text("#rv-note"), f"{in_game} in the game: {after}")
+            sets = len([m for m in fake.received if m.get("action") == "set"])
+            check("nothing is sent to the game until Send is pressed", len([m for m in fake.received if m.get("action") == "set"]) == sets)
+            await b.eval("document.getElementById('rv-send').click()")
+            await p.settle(3.5)
+            sent = [m for m in fake.received if m.get("action") == "set"][-1]
+            check("Send then gives the game the station first, followed by the rest of the route", sent["stops"][0].get("name") == "Near Charger" and len(sent["stops"]) == len(after), str(sent)[:200])
+            await p.shot("route-fuel")
             # -- leaving the route: the panel's warning, the alert (off until asked for), and Earth planning again
             def relay_api(method, path, body=None):
                 req = urllib.request.Request(base + path, method=method, data=None if body is None else json.dumps(body).encode(), headers={"X-ThrashDash": "1", "Content-Type": "application/json"})

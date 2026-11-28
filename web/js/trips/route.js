@@ -8,11 +8,12 @@
 
 import { api } from "../api.js";
 import { h } from "../dom.js";
-import { MAX_STOPS, addStop, moveStop, placesFromRoutes, removeStop, routeSummary, stopLabel, stopsSummary } from "./stops.js";
+import { MAX_STOPS, addStop, distanceText, insertFirst, moveStop, placesFromRoutes, removeStop, routeSummary, routeToExtend, stopLabel, stopsSummary } from "./stops.js";
 
 const SURE_MS = 4000;
 const PLAN_COLOUR = "#35c2ff";
 const STOP_COLOUR = "#ffb020";
+const FUEL_COLOUR = "#b78bfa";
 
 /**
  * @param {object} deps
@@ -27,11 +28,19 @@ const STOP_COLOUR = "#ffb020";
  * @param {() => void} deps.leave called when the view opens, so the page can hide the others
  * @param {() => void} deps.closed called when the user goes back
  */
+/** Text for a map tooltip as an element: Leaflet would read a string as markup, and a place's name is somebody else's text. */
+function plain(text) {
+  const el = document.createElement("span");
+  el.textContent = text;
+  return el;
+}
+
 export function createRouteView(deps) {
   const { $, state, tileLayerFor, currentBase, plan, refreshPlan, carPosition, when } = deps;
   const v = {
     open: false, stops: [], destinations: [], destinationsOn: true, places: [], sending: false,
-    map: null, tiles: null, stopLayer: null, planLayer: null, car: null, planKey: "", fitted: false, saving: null,
+    map: null, tiles: null, stopLayer: null, planLayer: null, fuelLayer: null, car: null, planKey: "", fitted: false, saving: null,
+    sent: false, fuel: null, finding: false, // (sent: the stops are just what was last sent; fuel: the places found nearby)
   };
 
   const local = () => state().client.local;
@@ -52,6 +61,7 @@ export function createRouteView(deps) {
     $("route-view").hidden = false;
     $("route-btn").setAttribute("aria-pressed", "true");
     $("rv-edit").hidden = !local();
+    $("rv-fuel-section").hidden = !local();
     ensureMap();
     v.fitted = false;
     drawAll();
@@ -88,6 +98,7 @@ export function createRouteView(deps) {
   function add(place) {
     if (!local()) return;
     const got = addStop(v.stops, place);
+    if (!got.error) v.sent = false;
     v.stops = got.stops;
     note(got.error, got.error ? "error" : "");
     drawAll();
@@ -123,6 +134,7 @@ export function createRouteView(deps) {
 
   function change(stops) {
     v.stops = stops;
+    v.sent = false;
     v.saving = null;
     note("");
     drawAll();
@@ -191,6 +203,57 @@ export function createRouteView(deps) {
     $("rv-places-add").disabled = !local() || !v.places.length;
   }
 
+  // ---- fuel and chargers nearby ------------------------------------------------------------------------------------------------------
+
+  async function findFuel() {
+    if (!local() || v.finding) return;
+    v.finding = true;
+    v.fuel = null;
+    drawFuel();
+    $("rv-fuel-note").textContent = "Asking BeamNG.Earth\u2026";
+    try {
+      const got = await api.findFuel();
+      v.fuel = got.places;
+      const more = got.done ? "" : " BeamNG.Earth is still fetching map data: search again in a moment for more.";
+      $("rv-fuel-note").textContent = (got.places.length ? "Distances are in a straight line." : "None found nearby.") + more;
+    } catch (e) {
+      $("rv-fuel-note").textContent = e.message;
+    } finally {
+      v.finding = false;
+      drawFuel();
+    }
+  }
+
+  function addFuel(place) {
+    // (a route is set but where it ends has not arrived yet: adding now would leave the rest of it behind)
+    if ((!v.stops.length || v.sent) && plan()?.active && !plan().dest) return note("The route in the game is still arriving: try again in a moment.", "error");
+    const base = routeToExtend(v.stops, v.sent, plan());
+    const got = insertFirst(base, { lat: place.lat, lon: place.lon, name: place.name });
+    if (got.error) return note(got.error, "error");
+    change(got.stops);
+    note(`${place.name} is now the next stop. Press Send to the game.`);
+  }
+
+  function drawFuel() {
+    const list = $("rv-fuel");
+    list.replaceChildren();
+    $("rv-fuel-find").disabled = !local() || v.finding;
+    v.fuelLayer?.clearLayers();
+    for (const place of v.fuel ?? []) {
+      const li = h("li", "rv-found", list);
+      const words = h("div", "rv-found-words", li);
+      h("span", "rv-found-name", words, place.name);
+      h("span", "rv-found-what muted", words, [place.kind === "charger" ? "Charger" : "Fuel", distanceText(place.metres, state().prefs)].filter(Boolean).join(" \u00b7 "));
+      const go = button(li, "Add as next stop", () => addFuel(place), "btn small", "Put this before your other stops");
+      go.setAttribute("aria-label", `Add ${place.name} as the next stop`);
+      if (v.fuelLayer) {
+        const tip = document.createElement("span"); // (a place's name is somebody else's text: never as markup)
+        tip.textContent = place.name;
+        L.circleMarker([place.lat, place.lon], { radius: 6, color: "#fff", weight: 2, fillColor: FUEL_COLOUR, fillOpacity: 1 }).bindTooltip(tip).addTo(v.fuelLayer);
+      }
+    }
+  }
+
   // ---- the map -----------------------------------------------------------------------------------------------------------------------
 
   function ensureMap() {
@@ -198,6 +261,7 @@ export function createRouteView(deps) {
     v.map = L.map("rvmap", { worldCopyJump: false });
     v.map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener noreferrer">Leaflet</a>');
     v.planLayer = L.layerGroup().addTo(v.map);
+    v.fuelLayer = L.layerGroup().addTo(v.map);
     v.stopLayer = L.layerGroup().addTo(v.map);
     v.map.setView([0, 0], 2);
     setBase(currentBase());
@@ -267,8 +331,8 @@ export function createRouteView(deps) {
       v.planLayer.clearLayers();
       if (key) {
         L.polyline(s.points, { color: PLAN_COLOUR, weight: 5, opacity: 0.9, lineCap: "round", lineJoin: "round", interactive: false }).addTo(v.planLayer);
-        for (const w of s.waypoints ?? []) L.circleMarker([w.lat, w.lon], { radius: 6, color: "#fff", weight: 2, fillColor: STOP_COLOUR, fillOpacity: 1 }).bindTooltip(w.name || "Stop").addTo(v.planLayer);
-        if (s.dest) L.circleMarker([s.dest.lat, s.dest.lon], { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d4d", fillOpacity: 1 }).bindTooltip(s.dest.name || "Destination").addTo(v.planLayer);
+        for (const w of s.waypoints ?? []) L.circleMarker([w.lat, w.lon], { radius: 6, color: "#fff", weight: 2, fillColor: STOP_COLOUR, fillOpacity: 1 }).bindTooltip(plain(w.name || "Stop")).addTo(v.planLayer);
+        if (s.dest) L.circleMarker([s.dest.lat, s.dest.lon], { radius: 8, color: "#fff", weight: 2, fillColor: "#ff4d4d", fillOpacity: 1 }).bindTooltip(plain(s.dest.name || "Destination")).addTo(v.planLayer);
         if (!v.fitted) fit();
       }
     }
@@ -280,6 +344,7 @@ export function createRouteView(deps) {
     drawSources();
     drawMap();
     drawPlan();
+    drawFuel();
   }
 
   // ---- sending -----------------------------------------------------------------------------------------------------------------------
@@ -291,6 +356,7 @@ export function createRouteView(deps) {
     note("Sending the route to the game…");
     try {
       await api.setRoute(v.stops);
+      v.sent = true;
       note("The game took it: BeamNG.Earth is planning the route, which will appear on the map in a moment.");
       v.fitted = false;
       for (let i = 0; i < 6; i++) {
@@ -359,6 +425,7 @@ export function createRouteView(deps) {
     $("rv-back").addEventListener("click", () => deps.closed());
     $("rv-send").addEventListener("click", send);
     $("rv-clear").addEventListener("click", clearRoute);
+    $("rv-fuel-find").addEventListener("click", findFuel);
     $("rv-clear-stops").addEventListener("click", () => change([]));
     $("rv-places-add").addEventListener("click", () => {
       const p = v.places[Number($("rv-places").value)];

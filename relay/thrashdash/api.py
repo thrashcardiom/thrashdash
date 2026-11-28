@@ -28,6 +28,7 @@ AUTH = web.AppKey("auth", object)  # the AuthStore: the PIN for devices on the n
 NOTICES = web.AppKey("notices", object)  # trip popups (tripnotice.TripNotices), or None
 TRIPLOG = web.AppKey("triplog", object)  # the TripLog (where the car has been), or None when this run keeps none
 ROUTE_PLANNER = web.AppKey("route_planner", object)  # the RoutePlanner (sets the GPS route in the game), or None
+FUEL_FINDER = web.AppKey("fuel_finder", object)  # the FuelFinder (asks the game for fuel and chargers nearby), or None
 DESTINATIONS = web.AppKey("destinations", object)  # the DestinationStore (saved destinations), or None
 CIRCUITS = web.AppKey("circuits", object)  # the CircuitStore (lap timing circuits), or None
 LAPS = web.AppKey("laps", object)  # the LapStore (finished laps and bests), or None
@@ -677,6 +678,18 @@ async def clear_route(request):
     return web.json_response({"ok": True})
 
 
+async def find_fuel(request):
+    """Search for filling stations and chargers near the car: {places: [{name, kind: "fuel"|"charger", lat, lon, metres}...] (straight
+    line, nearest first), done}. It asks the game, so like setting a route it is for this computer only."""
+    finder = request.app[FUEL_FINDER]
+    if finder is None:
+        return _error(404, "searching is not available in this run")
+    result = await finder.search()
+    if not result["ok"]:
+        return _error(409, result["why"])
+    return web.json_response({"places": result["places"], "done": result["done"]})
+
+
 def _destinations(request):
     store = request.app[DESTINATIONS]
     if store is None:
@@ -723,6 +736,7 @@ def add_routes(app):
     r.add_get("/api/route", get_route)
     r.add_post("/api/route", set_route)
     r.add_delete("/api/route", clear_route)
+    r.add_post("/api/route/fuel", find_fuel)
     r.add_get("/api/destinations", list_destinations)
     r.add_post("/api/destinations", create_destination)
     r.add_delete("/api/destinations/{id}", delete_destination)

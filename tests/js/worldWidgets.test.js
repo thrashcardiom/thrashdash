@@ -56,7 +56,7 @@ test("the route panel shows progress, and 'no route' when none is set", () => {
   assert.equal(routeView({ ...values, "geo.route.remaining": 860 }, prefs, now).distanceLeft, "0.9 km"); // small distances keep a decimal
   assert.equal(routeView({ ...values, "geo.route.remaining": 12345 }, { distance: "mi" }, now).distanceLeft, "7.7 mi");
   const none = routeView({ "geo.route.active": false }, prefs, now);
-  assert.deepEqual(none, { active: false, name: "", arrival: "--", timeLeft: "--", distanceLeft: "--", offRoute: false, planning: "", next: null });
+  assert.deepEqual(none, { active: false, name: "", arrival: "--", timeLeft: "--", distanceLeft: "--", offRoute: false, planning: "", next: null, stop: null });
   assert.equal(routeView({}, prefs, now).active, false); // the game is not sending at all
 });
 
@@ -250,5 +250,17 @@ test("the route panel says when a route is being planned, and which kind of plan
   assert.equal(view({ "geo.route.planning": true, "geo.route.replanning": false }), "Planning route\u2026");
   assert.equal(view({ "geo.route.planning": true, "geo.route.replanning": true }), "Re-routing\u2026");
   assert.equal(routeView({ "geo.route.active": false, "geo.route.planning": true }, prefs, 0).planning, "");
+});
+
+test("the route panel shows the next stop on the way: its name, how far and when", () => {
+  const now = new Date(2026, 10, 21, 9, 0, 0).getTime();
+  const base = { "geo.route.active": true, "geo.route.stop.distance": 3200, "geo.route.stop.eta": 300, "geo.route.stop.number": 2 };
+  assert.deepEqual(routeView({ ...base, "geo.route.stop.name": "Cafe" }, prefs, now).stop, { name: "Cafe", text: `3.2 km \u00b7 ${formatArrival(300, now)}` });
+  assert.equal(routeView(base, prefs, now).stop.name, "Stop 2");
+  assert.equal(routeView({ ...base, "geo.route.stop.distance": 24000 }, { distance: "mi" }, now).stop.text.startsWith("15 mi"), true);
+  assert.equal(routeView({ ...base, "geo.route.stop.eta": undefined }, prefs, now).stop.text, "3.2 km");
+  assert.equal(routeView({ "geo.route.active": true }, prefs, now).stop, null);
+  assert.equal(routeView({ ...base, "geo.route.active": false }, prefs, now).stop, null);
+  assert.equal(specs.route.defaults.showStop, true);
 });
 

@@ -6,10 +6,11 @@ import { resolveUnit } from "../units.js";
 export const spec = {
   label: "Route and ETA",
   size: { w: 300, h: 340 },
-  defaults: { showName: true, showOff: true, showNext: true },
+  defaults: { showName: true, showOff: true, showNext: true, showStop: true },
   props: {
     label: { type: "text", label: "Title", max: 20 },
     showNext: { type: "bool", label: "Show the next turn" },
+    showStop: { type: "bool", label: "Show the next stop on the way" },
     showName: { type: "bool", label: "Show the destination" },
     showOff: { type: "bool", label: "Show a warning when off the route" },
   },
@@ -149,6 +150,22 @@ export function formatArrival(eta, nowMs) {
   return new Date(nowMs + s * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+/**
+ * The next stop before the destination, as plain data: {name, text} ("3.2 km \u00b7 14:05", how far and when), or null with no stop on the way.
+ * An unnamed stop is called by its number on the route.
+ */
+export function nextStop(values, prefs, nowMs) {
+  const metres = num(values["geo.route.stop.distance"]);
+  if (metres === null) return null;
+  const name = values["geo.route.stop.name"];
+  const number = num(values["geo.route.stop.number"]);
+  const unit = resolveUnit("distance", prefs ?? {});
+  const far = unit.convert(metres);
+  const arrival = formatArrival(values["geo.route.stop.eta"], nowMs);
+  const text = [`${far < 10 ? far.toFixed(1) : Math.round(far)} ${unit.label}`, arrival === MISSING ? "" : arrival].filter(Boolean).join(" \u00b7 ");
+  return { name: typeof name === "string" && name ? name : number === null ? "Stop" : `Stop ${number}`, text };
+}
+
 /** What the widget shows, as plain data (so it can be tested without a browser). */
 export function routeView(values, prefs, nowMs) {
   const distance = resolveUnit("distance", prefs ?? {});
@@ -165,6 +182,7 @@ export function routeView(values, prefs, nowMs) {
     offRoute: active && off !== null && off > OFF_ROUTE_M,
     planning: !active || values["geo.route.planning"] !== true ? "" : values["geo.route.replanning"] === true ? "Re-routing\u2026" : "Planning route\u2026",
     next: active ? nextTurn(values, prefs) : null,
+    stop: active ? nextStop(values, prefs, nowMs) : null,
   };
 }
 
@@ -183,6 +201,16 @@ export function create(def, ctx) {
     distEl = h("div", "rt-ndist", words, "");
     textEl = h("div", "rt-ntext", words, "");
     thenEl = h("div", "rt-then", words, "");
+  }
+  let stopBox = null;
+  let stopName, stopText;
+  if (def.showStop !== false) {
+    stopBox = h("div", "rt-stop", root);
+    stopBox.hidden = true;
+    const head = h("div", "rt-stop-head", stopBox);
+    h("span", "rt-label", head, "Next stop");
+    stopText = h("span", "rt-stop-text", head, "");
+    stopName = h("div", "rt-stop-name", stopBox, "");
   }
   const rows = {};
   for (const [key, label] of [["arrival", "Arrive"], ["timeLeft", "Time left"], ["distanceLeft", "Distance left"]]) {
@@ -213,6 +241,13 @@ export function create(def, ctx) {
           set("ntext", textEl, v.next.text);
           set("then", thenEl, v.next.then);
           thenEl.hidden = !v.next.then;
+        }
+      }
+      if (stopBox) {
+        stopBox.hidden = !v.stop;
+        if (v.stop) {
+          set("stopname", stopName, v.stop.name);
+          set("stoptext", stopText, v.stop.text);
         }
       }
       set("plan", planEl, v.planning);

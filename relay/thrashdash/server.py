@@ -9,7 +9,7 @@ from . import __version__
 from .auth import COOKIE_NAME, AuthStore
 from .lifecycle import WindowCounter
 from .windows import WindowRegistry
-from .api import AUTH, CIRCUITS, CONFIGS, DESTINATIONS, HUB, LAPS, ROUTE_PLANNER, LAN_CONTROLLER, LAYOUTS, LOCAL_CHECK, NOTICES, QUIT, SETTINGS, TRIPLOG, WINDOW_OPENER, WINDOWS, add_routes, check_write_allowed, set_session_cookie
+from .api import AUTH, CIRCUITS, CONFIGS, DESTINATIONS, FUEL_FINDER, HUB, LAPS, ROUTE_PLANNER, LAN_CONTROLLER, LAYOUTS, LOCAL_CHECK, NOTICES, QUIT, SETTINGS, TRIPLOG, WINDOW_OPENER, WINDOWS, add_routes, check_write_allowed, set_session_cookie
 from .lan import LanController
 from .netinfo import host_allowed, is_local_client
 from .paths import web_root
@@ -215,7 +215,7 @@ async def ws_handler(request):
 MAX_BODY = 256 * 1024  # a layout is a few KB; this bounds what any write can make us buffer
 
 
-def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_client, windows=None, auth=None, triplog=None, notices=None, configs=None, circuits=None, laps=None, route_planner=None, destinations=None):
+def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_client, windows=None, auth=None, triplog=None, notices=None, configs=None, circuits=None, laps=None, route_planner=None, destinations=None, fuel_finder=None):
     """Build the web application. `lan` controls network access (default: an inert controller, i.e. off).
     `local_check(remote_address)` says whether a client is this computer; tests replace it to play a remote device."""
     app = web.Application(middlewares=[guard], client_max_size=MAX_BODY)
@@ -226,6 +226,7 @@ def make_app(hub, http_port, layouts, settings, lan=None, local_check=is_local_c
     app[CONFIGS] = configs  # saved sets of windows (configs.ConfigStore), or None
     app[CIRCUITS] = circuits  # lap timing circuits (laps.CircuitStore), or None
     app[ROUTE_PLANNER] = route_planner  # sets the GPS route in the game (routeplan.RoutePlanner), or None
+    app[FUEL_FINDER] = fuel_finder  # finds fuel and chargers near the car (routeplan.FuelFinder), or None
     app[DESTINATIONS] = destinations  # saved destinations (routeplan.DestinationStore), or None
     app[LAPS] = laps  # their finished laps and bests (laps.LapStore), or None
     app[WINDOW_OPENER] = {}  # filled in by __main__ once it can launch windows

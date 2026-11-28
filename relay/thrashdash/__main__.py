@@ -21,7 +21,7 @@ from .store import LayoutStore, SettingsStore
 from .triplog import TripLog
 from .configs import ConfigStore
 from .laps import CircuitStore, LapStore, LapTimer
-from .routeplan import DestinationStore, RoutePlanner
+from .routeplan import DestinationStore, FuelFinder, RoutePlanner
 from .windows import WindowRegistry, open_config_windows, open_windows
 from .tripnotice import TripNotices
 from . import earthlaunch
@@ -87,7 +87,7 @@ async def amain(args):
             print("--debug-pin must be 4 to 8 digits", file=sys.stderr)
             return 2
         auth.set_pin(args.debug_pin)
-    app = make_app(hub, args.http_port, layouts, settings, lan=lan, auth=auth, local_check=(lambda remote: False) if args.debug_treat_clients_as_remote else is_local_client, windows=windows, notices=notices, configs=configs, circuits=circuits, laps=laps, route_planner=RoutePlanner(notices, hub), destinations=DestinationStore(data_dir / "destinations.json"))
+    app = make_app(hub, args.http_port, layouts, settings, lan=lan, auth=auth, local_check=(lambda remote: False) if args.debug_treat_clients_as_remote else is_local_client, windows=windows, notices=notices, configs=configs, circuits=circuits, laps=laps, route_planner=RoutePlanner(notices, hub), destinations=DestinationStore(data_dir / "destinations.json"), fuel_finder=FuelFinder(notices, hub))
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     lan.attach(runner)

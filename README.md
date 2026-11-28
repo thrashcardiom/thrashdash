@@ -11,14 +11,16 @@
 - **What happened on the way.** Stops (and the places you stopped at), refuels, impacts (marked by how hard you hit, not only by the damage), peak G, how a route you set went, and **waypoints** you drop with a key and add notes to.
 - **A live map.** The Trips page opens each new trip by itself and follows the car; the same map can sit on any dashboard as a widget.
 - **All your driving added up.** A **Stats** view (totals, records, each vehicle's economy), search and favourites, **compare** two drives of the same route, **join** and **cut** trips, delete several at once, **back up** and **restore** the lot, and **import** a drive recorded elsewhere as a GPX file.
+- **Plan a route and follow it.** Send a route with stops to BeamNG.Earth from the Trips page, find **fuel and chargers nearby** and put one next, and see the next turn, the next stop and your arrival time on a dashboard.
+- **Time your laps.** Draw start and sector lines on a drive you have recorded, and laps are timed from then on.
 - **Take trips with you.** Download a trip as **GPX**, **KML** (Google Earth) or **CSV** (a spreadsheet), or as **one web page** that anyone can open with nothing installed.
 - **Popups in the game** when a trip ends (or starts), and ThrashDash can **start BeamNG.Earth for you** (the newest version in a folder) and quit when it closes.
-- **Dashboards**, the original half: a drag-and-drop editor, thirteen widget types, ten ready-made dashboards, four looks, tyres, damage, alerts, trip meters, per-vehicle dashboards, and phones and tablets over your network.
+- **Dashboards**, the original half: a drag-and-drop editor, sixteen widget types, twelve ready-made dashboards, four looks, tyres, damage, alerts, trip meters, per-vehicle dashboards, and phones and tablets over your network.
 - **Your windows come back as you left them**, the map window included, and close when ThrashDash does.
 - **No accounts and no cloud.** Everything runs on your computer. The one thing that uses the internet is the map pictures (OpenStreetMap, or EOX's satellite picture); nothing about your trips is sent anywhere.
 
 > [!NOTE]
-> ThrashDash is at version 0.1.3. It has been developed and tested against BeamNG.drive 0.40.5 and BeamNG.Earth 1.9 on Linux. The Windows build has been compiled and run once on Windows 11 and worked, but has had much less use than the Linux one (see [Known limitations](#known-limitations)).
+> ThrashDash is at version 0.1.4. It has been developed and tested against BeamNG.drive 0.40.5 and BeamNG.Earth 1.9 on Linux. The Windows build has been compiled and run once on Windows 11 and worked, but has had much less use than the Linux one (see [Known limitations](#known-limitations)).
 
 ## Contents
 
@@ -87,14 +89,14 @@ The AppImage is one file that contains the program, Python and the pages. Thrash
 1. Download `ThrashDash-<version>-x86_64.AppImage` from the project's [Releases page](https://github.com/thrashcardiom/thrashdash/releases). Each release lists the file's SHA-256 checksum; to check your download matches it:
 
    ```sh
-   sha256sum ThrashDash-0.1.3-x86_64.AppImage
+   sha256sum ThrashDash-0.1.4-x86_64.AppImage
    ```
 
 2. Make the file executable (once), then run it:
 
    ```sh
-   chmod +x ThrashDash-0.1.3-x86_64.AppImage
-   ./ThrashDash-0.1.3-x86_64.AppImage
+   chmod +x ThrashDash-0.1.4-x86_64.AppImage
+   ./ThrashDash-0.1.4-x86_64.AppImage
    ```
 
    Or double-click it in your file manager. A window opens by itself.
@@ -102,7 +104,7 @@ The AppImage is one file that contains the program, Python and the pages. Thrash
 3. Install the mod into the game, with one command (the mod is inside the AppImage):
 
    ```sh
-   ./ThrashDash-0.1.3-x86_64.AppImage --install-mod
+   ./ThrashDash-0.1.4-x86_64.AppImage --install-mod
    ```
 
    It looks for BeamNG.drive's user folder by itself. If it cannot find it, name the folder: `--install-mod /path/to/BeamNG.drive` (in the game launcher, **Manage User Folder** opens it). It never replaces a link, and it only replaces an earlier *copy* of the mod, never a folder it does not recognise. A copy installed under an earlier name of this program is removed too, otherwise the game would load both and every packet would be sent twice.
@@ -114,7 +116,7 @@ Things to know about the AppImage:
 - **It quits by itself** when you close the last window, and there is a **Quit** button next to **Edit** (move the mouse over a dashboard window and it appears). (Phones looking at the pages do not keep it running.) If no window ever opens, it quits after about a minute and a half rather than running unseen.
 - **Messages** go to `thrashdash.log` in [the data folder](docs/reference.md#where-things-are-stored) when it is started from a desktop (only the latest run is kept), and to the terminal when started from one.
 - **No Chromium-based browser?** ThrashDash opens your default browser instead. It works there too, in an ordinary window rather than a borderless one.
-- It needs FUSE to run, like all AppImages. If it will not start, try `./ThrashDash-0.1.3-x86_64.AppImage --appimage-extract-and-run`, or install FUSE 2 (`libfuse2`).
+- It needs FUSE to run, like all AppImages. If it will not start, try `./ThrashDash-0.1.4-x86_64.AppImage --appimage-extract-and-run`, or install FUSE 2 (`libfuse2`).
 - To update, replace the file and run `--install-mod` again if the release notes say the mod changed.
 
 ### Option B: the Windows zip
@@ -198,7 +200,7 @@ py -m venv .venv
 Try it without the game first. The simulator drives a fake car through gears, braking, tyre punctures and damage, so every dashboard comes alive (it keeps no trips):
 
 ```sh
-./ThrashDash-0.1.3-x86_64.AppImage --simulate                 # the AppImage
+./ThrashDash-0.1.4-x86_64.AppImage --simulate                 # the AppImage
 .venv/bin/python relay/run.py --simulate                      # from the source (Windows: .venv\Scripts\python relay\run.py --simulate)
 ```
 
@@ -364,6 +366,10 @@ BeamNG.Earth's own map is the only place to set a GPS route in the game. The **R
 2. **Send to the game.** BeamNG.Earth plans the real road route, so ThrashDash cannot show it before sending: the dashed line between your stops is only the order. When the game has taken the stops, the planned route comes back and is drawn (a solid line, the stops on the way in amber and the destination in red), with where it goes, how far and how long. If the game refuses (stops too far apart, say) it says why. The game must be running with the BeamNG.Earth level loaded, and BeamNG restarted since ThrashDash was updated.
 3. **Clear the route in the game** clears it.
 
+**While you drive.** The [Route and ETA](docs/dashboards.md#route-and-eta-beamngearth) widget, on the ready-made **Navigation** dashboard or any of your own, shows the next turn, the next stop on the way and when you arrive. It says **Re-routing…** while BeamNG.Earth plans again after a wrong turn, and there is an optional [alert](docs/dashboards.md#alerts) for leaving the route.
+
+**Fuel and charging nearby.** Press **Fuel nearby** in the Route view to list the filling stations and charging stations round the car, nearest first, with the distance **in a straight line** (the drive may be longer). They come from BeamNG.Earth's own place data: within 3 km first and, if that finds fewer than three, up to 25 km through the map data Earth already has. Closed places are left out. **Add as next stop** puts one ahead of your other stops (with no stops of your own on the page, or after you have sent them, ahead of what is left of the route in the game); nothing changes in the game until you press **Send to the game**. If it says map data is still being fetched, search again in a moment. The game mod must be up to date (`--install-mod`, then restart BeamNG).
+
 **The route line.** ThrashDash draws the line BeamNG.Earth itself planned. Earth takes the road geometry from its routing service and keeps only the points that shape it, to within about 4 m, so a long straight has few points and a bend has many. A route with more than 1,500 points (usually a very long one) is simplified further by shape, so bends are kept while the line can sit a little farther from the road. ThrashDash asks no outside service about your route.
 
 **On the live map.** While a route is set, the map of the trip being driven (the Trips page, and the live map widget on a dashboard) draws it: a dashed line from the car to the destination, a red pin at the destination, and a chip saying where to and how far. It goes when the route does. A trip that has ended shows no route: it is about now.
@@ -441,8 +447,8 @@ The original half of ThrashDash. A dashboard is a layout of widgets you design y
 ![The Dashboards menu](docs/screenshots/menu.png)
 
 - **A drag-and-drop editor** (press **E**): move and resize widgets, search every channel the game sends, save, import and export your own dashboards.
-- **Thirteen widget types**: round gauges, bars, gear, lamps, readouts, history graphs, text, tyres, car damage, driver inputs, a G-force meter, a trip computer, and the live map.
-- **Ten ready-made dashboards**, from a full instrument cluster to a minimal speed-and-gear display, and **four looks** that turn any dashboard into chrome-and-glass instruments.
+- **Sixteen widget types**: round gauges, bars, gear, lamps, readouts, history graphs, text, tyres, car damage, driver inputs, a G-force meter, a trip computer, the live map, a speed limit sign, a route panel with the next turn and the next stop, and a lap timer.
+- **Twelve ready-made dashboards**, from a full instrument cluster to a minimal speed-and-gear display, with ones for navigation and track days, and **four looks** that turn any dashboard into chrome-and-glass instruments.
 - **Tyres, damage and component states**, with an alert banner when something goes wrong.
 - **Two trip meters** (A and B) with fuel or battery economy and range, kept across restarts.
 - **Per-vehicle dashboards** that switch by themselves when you change car.
@@ -502,6 +508,8 @@ Useful command-line options (the full list is in the reference): `--simulate` (f
 | A new trip does not open on the map by itself | Is **Open new trips automatically** ticked (above the list) and the page not on **All trips**? Reload the Trips page after updating ThrashDash: a window opened before the update keeps its old code. |
 | The map is blank, or shows "Access blocked" | The map pictures come from the internet. Offline you still get the route and figures on a blank map. "Access blocked" means a map server refused the request: use the Trips page in ThrashDash (it sends what OpenStreetMap needs); a shared page opened from disk uses the satellite picture for the same reason. |
 | The satellite picture is blurry | It is about 10 m a pixel. Use **Street** for anything close up. |
+| **Send to the game** or **Fuel nearby** says the game is not connected, or did not answer | The BeamNG.Earth level must be loaded and the car have sent a position. After updating ThrashDash run `--install-mod` again, restart the game and respawn the car: an older mod does not answer a search. |
+| The route panel shows no **Next stop** | It shows only while there is a stop before the destination. It also needs the current mod (`--install-mod`, then restart the game), and the **Show the next stop on the way** box ticked on the widget. |
 | No popups in the game | Press **Send a test popup** (Trips page, **Popups and settings**). It says whether the game could be reached. The game must be in the Earth level and have sent a position, and must have been restarted since the mod was installed or updated. `beamng.log` shows *message from ThrashDash shown* for each one received. |
 | I crashed and the trip has no impact marker | A knock is an impact only if it damaged the body by the set percentage (default 1%) **or** was at least the set force (default 4 g). A real crash can mark the body very little. Lower the numbers under **Popups and settings, What counts as an impact**: the trip keeps every knock it felt (down to 0.1% or 2 g), so nothing needs recording again. Force (g) is only recorded by this version of ThrashDash, so a trip driven before it has damage alone; older trips are worked out again the first time they are read, so restart ThrashDash after updating. |
 | There is no "ThrashDash: drop a waypoint" in the game's controls, or the key does nothing | It is unbound until you bind it (**Options, Controls**), and the game finds it when it **starts**: restart the game after installing or updating the mod. A waypoint is only saved while a trip is being recorded; the game says so when none is. |
@@ -532,7 +540,7 @@ Useful command-line options (the full list is in the reference): `--simulate` (f
 ## Known limitations
 
 - **Windows is lightly tested.** The Windows build recipe (`packaging/build.ps1`) has been used to build `thrashdash.exe` and it ran and worked on one Windows machine, but it has seen far less use than the Linux version. If `--install-mod` cannot find the game's user folder, name it yourself.
-- **What has been tried in the real game.** Positions, places, limits, weather, peak G and impacts have been seen in real drives. Waypoints and the places named at stops have so far been tested against a stand-in (a fake game extension), not the real thing, so report anything that differs. Starting BeamNG.Earth along with ThrashDash has been tried with the real Earth on both Linux and Windows 11.
+- **What has been tried in the real game.** Positions, places, limits, weather, peak G and impacts have been seen in real drives, and so have sending a GPS route, re-routing after a wrong turn, the next stop and the search for fuel nearby (on Linux). Waypoints and the places named at stops have so far been tested against a stand-in (a fake game extension), not the real thing, so report anything that differs. Starting BeamNG.Earth along with ThrashDash has been tried with the real Earth on both Linux and Windows 11.
 - **The trip log needs BeamNG.Earth** and was developed against its modding API, version 1.8 (the Earth app 1.9). A future change to that API could stop the log until ThrashDash is updated: the game extension does nothing, harmlessly, when the API is not there.
 - **Speeding is counted only where a limit is posted**, which is about one road in ten in BeamNG.Earth's data. The figure is honest about how much of the trip it covers, but it is not a full picture.
 - **Peak G includes crashes.** It is the strongest force on the car in the trip, from the car's own smoothed acceleration, so a hard impact can be the peak. It is the strongest second, not a single instant.
@@ -540,8 +548,8 @@ Useful command-line options (the full list is in the reference): `--simulate` (f
 - **Wayland** cannot place windows without the opt-in X11 mode.
 - **Electric and hybrid cars** are covered by tests but have not been tried in the real game. Hybrids show the percentage of tank or battery used, not litres or kWh.
 - **Network access** is protected by a PIN but not encrypted (no https), so it deters casual visitors rather than someone watching the network; and phones cannot keep the screen awake without https.
-- **Dashboards:** alerts are a banner only (no sound), looks cannot yet be made from your own images, and a dashboard is a fixed canvas that scales rather than reflowing for different screen shapes. Showing the game's camera views in a separate window was investigated and dropped: the game offers no fast way to read the picture back.
-- **Not planned for now:** lap timing, and an in-page Google Maps option (Google Earth works through the KML file).
+- **Dashboards:** looks cannot yet be made from your own images, and a dashboard is a fixed canvas that scales rather than reflowing for different screen shapes. Showing the game's camera views in a separate window was investigated and dropped: the game offers no fast way to read the picture back.
+- **Not planned for now:** an in-page Google Maps option (Google Earth works through the KML file).
 
 ## Licence and credits
 
@@ -552,7 +560,7 @@ ThrashDash is released under the MIT licence: **Copyright (c) 2026 Thrash Cardio
 The packaged program (the AppImage) also contains other people's software: Python, its libraries, and the bundled fonts. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists all of it with each licence, and the complete licence texts travel inside the AppImage. To read them:
 
 ```sh
-./ThrashDash-0.1.3-x86_64.AppImage --appimage-extract 'usr/share/licenses/*'   # unpacks to ./squashfs-root/usr/share/licenses/thrashdash/
+./ThrashDash-0.1.4-x86_64.AppImage --appimage-extract 'usr/share/licenses/*'   # unpacks to ./squashfs-root/usr/share/licenses/thrashdash/
 ```
 
 The notices file and that folder are generated during the build by [`packaging/collect_licenses.py`](packaging/collect_licenses.py) from what was actually bundled, so they cannot drift from the program. If a build includes a native library the script does not know, the build stops and says which, so nothing is shipped without its licence.

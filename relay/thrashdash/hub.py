@@ -31,6 +31,7 @@ GEO_TYPES = ("geo", "geoinfo", "geoevent", "geopoi")
 #   geo.limit (m/s) and geo.limitPosted   from each `geoinfo` (every second), only while a limit is known
 #   geo.route.active, .remaining (m), .eta (s), .off (m from the route), .name   from each `georoute` (every second)
 #   geo.route.planning and .replanning    true while Earth is making a plan (replanning: a new one for a route it already had)
+#   geo.route.stop.distance (m), .eta (s), .name, .number, .ahead    the next stop before the destination, while there is one
 #   lap.*                                 from the lap timer (laps.py), with every live position (ten a second)
 # They are the game's latest word and nothing more: a reading older than this is dropped rather than shown (the game may have
 # been paused, or closed), so a stale limit can never raise an alert.
@@ -46,6 +47,7 @@ PLAN_SHOW_S = 3.0  # a plan is shown for at least this long: Earth is often done
 MAX_STEPS = 200
 MAX_PATH_POINTS = 1500  # the route's line (trips.lua sends no more)
 MAX_STOPS = 12
+MAX_FUEL_PLACES = 30  # the most filling stations and chargers taken from one answer (trips.lua sends 15)
 STEP_TEXT_MAX = 60
 STEP_PASSED_M = 15.0  # a maneuver stays "next" until the car is this far past it, so it does not vanish the moment it is reached
 MAX_EXIT = 30
@@ -120,6 +122,7 @@ class Hub:
         self._route_raw = None  # the latest progress packet's numbers: {"version", "remaining"}, to work out the next maneuver from
         self._route_steps = None  # {"version", "dist", "steps"} from the latest `geosteps`
         self._route_path = None  # {"version", "points", "dest", "waypoints"} from the latest `georoutepath`: the planned route's line, for the maps
+        self.fuel = None  # the game's latest answer to a search for filling stations and chargers: {"id", "origin", "places", "done", "why"}
         self.route_ack = {"seq": 0, "ok": None, "why": None}  # the game's answer to the latest command to set or clear the route
         self._g_peak = 0.0  # the strongest force on the car (m/s^2) seen since the last position sample
         self._frame_json = (None, "")  # (seq, serialized) cache so N browsers share one json.dumps
@@ -161,6 +164,8 @@ class Hub:
             self._accept_path(packet)
         elif kind == "georouteack":
             self._accept_ack(packet)
+        elif kind == "geofuel":
+            self._accept_fuel(packet)
         elif kind == "geolive":
             self._accept_live(packet)
         elif kind == "catalog":
@@ -234,6 +239,7 @@ class Hub:
             if isinstance(name, str) and name.strip():
                 channels["geo.route.name"] = name.strip()[:ROUTE_NAME_MAX]
         self._add_planning(channels, gps)
+        self._add_stop(channels, gps)
         self._route_raw = None
         if isinstance(gps, dict):
             version, remaining = gps.get("routeVersion"), gps.get("remaining")
@@ -265,6 +271,50 @@ class Hub:
         shown = self._plan_shown
         channels["geo.route.planning"] = shown is not None
         channels["geo.route.replanning"] = shown is not None and shown[0]
+
+    @staticmethod
+    def _add_stop(channels, gps):
+        """geo.route.stop.*: the next stop before the destination. The planned route's legs run from its start through each stop;
+        how far along it the car is comes from what remains, and the legs already passed from how many stops are still ahead."""
+        stops = gps.get("stops") if isinstance(gps, dict) else None
+        remaining = channels.get("geo.route.remaining")
+        if not isinstance(stops, dict) or remaining is None:
+            return
+        ahead, legs = stops.get("ahead"), stops.get("legs")
+        if not _finite(ahead) or ahead != int(ahead) or not 1 <= ahead < MAX_STOPS or not isinstance(legs, list) or not 2 <= len(legs) <= MAX_STOPS:
+            return
+        if not all(isinstance(leg, list) and len(leg) == 2 and all(_finite(v) and 0 <= v <= ROUTE_MAX_M for v in leg) for leg in legs):
+            return
+        passed = len(legs) - 1 - int(ahead)
+        if passed < 0:
+            return  # (more stops than the plan has legs for: a new stop not planned yet)
+        travelled = sum(leg[0] for leg in legs) - remaining
+        distance = max(0.0, sum(leg[0] for leg in legs[: passed + 1]) - travelled)
+        length, duration = legs[passed]
+        channels["geo.route.stop.distance"] = round(distance, 1)
+        channels["geo.route.stop.eta"] = round(min(ROUTE_MAX_S, duration * distance / length), 1) if length > 0 else 0.0
+        channels["geo.route.stop.number"] = passed + 1
+        channels["geo.route.stop.ahead"] = int(ahead)
+        name = stops.get("name")
+        if isinstance(name, str) and name.strip():
+            channels["geo.route.stop.name"] = name.strip()[:ROUTE_NAME_MAX]
+
+    def _accept_fuel(self, packet):
+        """The game's answer to a search for filling stations and chargers: {"id", "lat", "lon" (where it searched from),
+        "places": [{"n", "kind", "lat", "lon"}...], "done", "why"?}. Only named places on Earth are kept."""
+        search, places = packet.get("id"), packet.get("places")
+        if not _finite(search):
+            self.stats["rejected_fuel"] += 1
+            return
+        found = []
+        for item in (places if isinstance(places, list) else [])[:MAX_FUEL_PLACES]:
+            place = self._place({"lat": item.get("lat"), "lon": item.get("lon"), "name": item.get("n")}) if isinstance(item, dict) else None
+            if place and "name" in place:
+                place["kind"] = "charger" if item.get("kind") == "charger" else "fuel"
+                found.append(place)
+        why = packet.get("why")
+        self.fuel = {"id": search, "origin": self._place(packet), "places": found, "done": packet.get("done") is True,
+                     "why": why[:120] if isinstance(why, str) else None}
 
     def _accept_steps(self, packet):
         """The steps of the route, once per route (and now and then again). Only plausible ones are kept: in order, in range, with short text."""

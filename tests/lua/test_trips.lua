@@ -813,5 +813,102 @@ do
   check("the extension name matches its file path", path == "thrashdash_trips", path)
 end
 
+-- ---- the stops still ahead, for the dashboard's "next stop" ------------------------------------------------------------------------
+local function progressFor(gps)
+  local M = load()
+  installEarth({ gps = function() return gps end })
+  M.onExtensionLoaded()
+  M.onUpdate(1)
+  local p = ofType("georoute")[1]
+  return p and p.gps or {}
+end
+
+do
+  local legs = { { 1000, 60 }, { 2000, 120 }, { 3000, 180 } }
+  local sent = progressFor({ remaining = 5500, routeVersion = 2, legs = legs, waypoints = { { lat = 1, lon = 2, name = string.rep("n", 90) }, { lat = 3, lon = 4 } } })
+  check("the stops ahead go with the progress: how many, the first one's name, and the legs", sent.stops and sent.stops.ahead == 2 and #sent.stops.name == 60 and #sent.stops.legs == 3 and sent.stops.legs[2][1] == 2000 and sent.stops.legs[2][2] == 120)
+  check("and nothing else about them", sent.waypoints == nil and sent.legs == nil and sent.stops.lat == nil)
+  check("with no stop ahead nothing is said", progressFor({ remaining = 10, routeVersion = 2, legs = legs, waypoints = {} }).stops == nil)
+  check("with no legs planned yet nothing is said", progressFor({ remaining = 10, routeVersion = 2, waypoints = { { lat = 1, lon = 2 } } }).stops == nil)
+  check("a leg that is not two numbers spoils the lot", progressFor({ remaining = 10, routeVersion = 2, legs = { { 1, 2 }, { "x", 3 } }, waypoints = { { lat = 1, lon = 2 } } }).stops == nil)
+end
+
+-- ---- filling stations and chargers nearby ------------------------------------------------------------------------------------------
+local function fuel() return ofType("geofuel") end
+local function station(name, category, extra)
+  local p = { name = name, category = category or "gas_station", lat = -41.2, lon = 174.8, open = "open", id = "x", confidence = 1 }
+  for k, v in pairs(extra or {}) do p[k] = v end
+  return p
+end
+local function search(overrides, id)
+  local M = load()
+  installEarth(overrides)
+  M.onExtensionLoaded()
+  say("f", { type = "places", action = "fuel", id = id or 41 }, RELAY)
+  M.onUpdate(0.1)
+  return M
+end
+local function has(...) local set = {}; for _, f in ipairs({ ... }) do set[f] = true end; return function(name) return set[name] == true end end
+
+do
+  local asks = {}
+  search({ has = has("places", "cachedPlaces"), places = function(lat, lon, opts, answer)
+    asks[#asks + 1] = { lat = lat, lon = lon, opts = opts }
+    answer({ places = { station("Z Petone"), station("ChargeNet Hutt", "ev_charging_station"), station("Tesla Supercharger"), station("Gone", nil, { open = "permanently_closed" }),
+                        station("Shut", nil, { open = "temporarily_closed" }), station(""), "junk", station("Nowhere", nil, { lat = "x" }) } })
+    return 7
+  end })
+  local r = fuel()[1] or { places = {} }
+  check("fuel is searched for round the car, three kilometres first", #asks == 1 and asks[1].lat == -41.2258 and asks[1].opts.radius == 3000 and asks[1].opts.categories[1] == "group:fuel" and asks[1].opts.limit == 15 and not asks[1].opts.cachedOnly)
+  check("the open, named places come back, and nothing about the closed ones", #r.places == 3 and r.places[1].n == "Z Petone", #r.places)
+  check("chargers are told apart, by category or by name", r.places[1].kind == "fuel" and r.places[2].kind == "charger" and r.places[3].kind == "charger")
+  check("with the number of the search, where it looked from, and that it is finished", r.id == 41 and r.lat == -41.2258 and r.done == true and r.why == nil)
+end
+
+do
+  local asks = {}
+  search({ has = has("places", "cachedPlaces"), places = function(_, _, opts, answer)
+    asks[#asks + 1] = opts
+    if opts.cachedOnly then answer({ places = { station("Far one"), station("Farther one") } }) else answer({ places = { station("Only near") } }) end
+    return 1
+  end })
+  local r = fuel()
+  check("too few near: it looks as far as 25 km through the map it has", #asks == 2 and asks[2].radius == 25000 and asks[2].cachedOnly == true and asks[2].categories[1] == "group:fuel")
+  check("and gives the fuller answer", #r == 1 and #r[1].places == 2 and r[1].done == true)
+end
+
+do
+  local late
+  local M = search({ has = has("places"), places = function(_, _, _, answer) late = answer; answer({ places = { station("From disk") }, pending = true }); return 1 end })
+  check("while more of the map is being fetched the answer says it is not finished", #fuel() == 1 and fuel()[1].done == false and #fuel()[1].places == 1)
+  late({ places = { station("From disk"), station("Fetched") } })
+  check("and the second answer finishes it (an older BeamNG.Earth searches no wider)", #fuel() == 2 and fuel()[2].done == true and #fuel()[2].places == 2)
+  say("g", { type = "places", action = "fuel", id = 42 }, RELAY)
+  local first = late
+  M.onUpdate(0.1)
+  local before = #fuel()
+  first({ places = { station("Stale") } })
+  check("an answer to an older search is dropped", #fuel() == before, #fuel() - before)
+end
+
+do
+  search({ has = has("places", "cachedPlaces"), places = function(_, _, opts, answer) if opts.cachedOnly then answer({ places = {} }) else answer({ places = {}, error = "no map data" }) end return 1 end })
+  check("nothing found and a reason: the reason is passed on", fuel()[1] and #fuel()[1].places == 0 and fuel()[1].why == "no map data" and fuel()[1].done == true)
+  search({ has = has("places"), places = function() return nil, "the app is not connected" end })
+  check("a search BeamNG.Earth will not take says why", fuel()[1] and fuel()[1].why == "the app is not connected")
+  search({ has = has() })
+  check("a BeamNG.Earth with no place search says so", fuel()[1] and fuel()[1].why:find("cannot search") ~= nil)
+  search({ has = has("places"), places = function() error("boom") end })
+  check("a search that raises is answered, not left hanging", fuel()[1] and fuel()[1].done == true and fuel()[1].why ~= nil)
+  local M = load()
+  installEarth({ has = has("places"), places = function() error("must not be asked") end })
+  M.onExtensionLoaded()
+  say("h", { type = "places", action = "fuel", id = "x" }, RELAY)
+  say("i", { type = "places", action = "other", id = 1 }, RELAY)
+  say("j", { type = "places", action = "fuel", id = 1 }, { ip = "192.168.1.5", port = 4568 })
+  M.onUpdate(0.1)
+  check("only a proper request from the relay is acted on", #fuel() == 0, #fuel())
+end
+
 print(string.format("%d passed, %d failed", passed, failed))
 os.exit(failed == 0 and 0 or 1)

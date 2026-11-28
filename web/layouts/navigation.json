@@ -1,0 +1,133 @@
+{
+  "format": 1,
+  "name": "Navigation",
+  "width": 1400,
+  "height": 600,
+  "scaleMode": "max",
+  "scalePercent": 100,
+  "widgets": [
+    {
+      "id": "tripmap-1",
+      "type": "tripmap",
+      "x": 20,
+      "y": 20,
+      "w": 760,
+      "h": 560,
+      "headUp": true,
+      "zoom": 17,
+      "satellite": false
+    },
+    {
+      "id": "route-1",
+      "type": "route",
+      "x": 800,
+      "y": 20,
+      "w": 340,
+      "h": 420,
+      "label": "Route",
+      "showNext": true,
+      "showName": true,
+      "showOff": true
+    },
+    {
+      "id": "speedlimit-1",
+      "type": "speedlimit",
+      "x": 1160,
+      "y": 20,
+      "w": 220,
+      "h": 270,
+      "speedChannel": "wheelspeed",
+      "style": "round",
+      "showSpeed": false
+    },
+    {
+      "id": "gear-1",
+      "type": "gear",
+      "x": 1160,
+      "y": 300,
+      "w": 220,
+      "h": 100,
+      "channel": "gear",
+      "label": "",
+      "style": "digit"
+    },
+    {
+      "id": "readout-1",
+      "type": "readout",
+      "x": 800,
+      "y": 460,
+      "w": 340,
+      "h": 120,
+      "channel": "wheelspeed",
+      "kind": "speed",
+      "label": "SPEED",
+      "decimals": 0,
+      "digits": 3
+    },
+    {
+      "id": "readout-2",
+      "type": "readout",
+      "x": 1160,
+      "y": 410,
+      "w": 220,
+      "h": 104,
+      "channel": "fuel",
+      "kind": "fraction",
+      "label": "FUEL",
+      "decimals": 0,
+      "digits": 3
+    },
+    {
+      "id": "light-1",
+      "type": "light",
+      "x": 1166,
+      "y": 528,
+      "w": 46,
+      "h": 46,
+      "channel": "signal_L",
+      "lampColor": "green",
+      "color": "var(--ok)",
+      "arrow": "left",
+      "icon": "left"
+    },
+    {
+      "id": "light-2",
+      "type": "light",
+      "x": 1220,
+      "y": 528,
+      "w": 46,
+      "h": 46,
+      "channel": "signal_R",
+      "lampColor": "green",
+      "color": "var(--ok)",
+      "arrow": "right",
+      "icon": "right"
+    },
+    {
+      "id": "light-3",
+      "type": "light",
+      "x": 1274,
+      "y": 528,
+      "w": 46,
+      "h": 46,
+      "channel": "checkengine",
+      "lampColor": "amber",
+      "color": "var(--warn)",
+      "text": "ENG",
+      "icon": "engine"
+    },
+    {
+      "id": "light-4",
+      "type": "light",
+      "x": 1328,
+      "y": 528,
+      "w": 46,
+      "h": 46,
+      "channel": "parkingbrake",
+      "lampColor": "red",
+      "color": "var(--crit)",
+      "text": "P",
+      "icon": "parking"
+    }
+  ]
+}

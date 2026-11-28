@@ -92,7 +92,7 @@ class StoreTests(unittest.TestCase):
 
     def test_builtin_listed_and_readonly(self):
         listing = self.store.list()
-        self.assertEqual([i["id"] for i in listing if i["builtin"]], ["default", "cluster", "drift", "driver", "health", "minimal", "offroad", "phone", "telemetry", "trip"])  # the plain default leads, then A-Z
+        self.assertEqual([i["id"] for i in listing if i["builtin"]], ["default", "cluster", "drift", "driver", "health", "minimal", "navigation", "offroad", "phone", "telemetry", "trackday", "trip"])  # the plain default leads, then A-Z
         layout, builtin = self.store.get("default")
         self.assertTrue(builtin)
         with self.assertRaises(ReadOnly):

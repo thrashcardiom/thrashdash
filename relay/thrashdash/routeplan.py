@@ -1,4 +1,4 @@
-"""Planning a GPS route from the Trips page: the stops, saved destinations, and sending the route to the game.
+"""Planning a GPS route from the Trips page: the stops, saved destinations, sending the route to the game, and finding fuel nearby.
 
 BeamNG.Earth plans the route (on the roads, in its own app); ThrashDash only says where to go. The Trips page's Route view collects stops (a
 map click, a saved destination, or a place from an earlier trip) and the relay passes them to the game's extension (trips.lua), which hands
@@ -9,6 +9,7 @@ Only this computer may set or clear a route (the API's write rule, like every ch
 """
 import asyncio
 import json
+import math
 import re
 import secrets
 from pathlib import Path
@@ -22,6 +23,9 @@ MAX_DESTINATIONS = 100
 MAX_DESTINATION_NAME = 40
 DESTINATION_ID_RE = re.compile(r"^d[0-9a-f]{8}$")
 ACK_WAIT_S = 3.0  # how long to wait for the game to say whether it took a route
+FUEL_WAIT_S = 8.0  # how long to wait for the whole answer to a search for fuel (BeamNG.Earth may have to fetch map data first)
+EARTH_M = 6371008.8
+NOT_CONNECTED = "The game is not connected: start BeamNG, load the BeamNG.Earth level and drive a moment, then try again."
 
 
 def _clean_text(value, limit, what):
@@ -140,7 +144,7 @@ class RoutePlanner:
         async with self._lock:
             before = self.hub.route_ack["seq"]
             if not self.notices.send_to_game(payload):
-                return {"ok": False, "why": "The game is not connected: start BeamNG, load the BeamNG.Earth level and drive a moment, then try again."}
+                return {"ok": False, "why": NOT_CONNECTED}
             waited = 0.0
             while waited < self.wait_s:
                 if self.hub.route_ack["seq"] != before:
@@ -149,3 +153,49 @@ class RoutePlanner:
                 await self._sleep(0.05)
                 waited += 0.05
             return {"ok": False, "why": "The game did not answer. Is the BeamNG.Earth level loaded, and BeamNG restarted since ThrashDash was updated?"}
+
+
+def metres_between(a, b):
+    """The straight-line distance between two {"lat", "lon"} places (good over the few tens of kilometres a search covers)."""
+    across = math.radians(b["lon"] - a["lon"]) * math.cos(math.radians((a["lat"] + b["lat"]) / 2))
+    return math.hypot(across, math.radians(b["lat"] - a["lat"])) * EARTH_M
+
+
+class FuelFinder:
+    """Asks the game for the filling stations and chargers near the car (BeamNG.Earth's own place data). One search at a time."""
+
+    def __init__(self, notices, hub, wait_s=FUEL_WAIT_S, sleep=asyncio.sleep):
+        self.notices = notices
+        self.hub = hub
+        self.wait_s = wait_s
+        self._sleep = sleep
+        self._lock = asyncio.Lock()
+        self._number = secrets.randbelow(1_000_000)  # (so an answer to a search of an earlier run is not taken for this one's)
+
+    async def search(self):
+        """{"ok": True, "places": [{name, kind, lat, lon, metres}...] nearest first, "done": bool} or {"ok": False, "why": str}.
+        `done` is False when BeamNG.Earth was still fetching map data after the wait: asking again later may find more."""
+        if self.notices is None:
+            return {"ok": False, "why": "This run of ThrashDash cannot talk to the game."}
+        async with self._lock:
+            self._number += 1
+            number = self._number
+            if not self.notices.send_to_game({"type": "places", "action": "fuel", "id": number}):
+                return {"ok": False, "why": NOT_CONNECTED}
+            answer, waited = None, 0.0
+            while waited < self.wait_s:
+                latest = self.hub.fuel
+                if latest is not None and latest["id"] == number:
+                    answer = latest
+                    if answer["done"]:
+                        break
+                await self._sleep(0.05)
+                waited += 0.05
+        if answer is None:
+            return {"ok": False, "why": "The game did not answer. Is the BeamNG.Earth level loaded, and BeamNG restarted since ThrashDash was updated?"}
+        if answer["why"] and not answer["places"]:
+            return {"ok": False, "why": f"The search failed: {answer['why']}."}
+        origin = answer["origin"]
+        places = [{**p, "metres": round(metres_between(origin, p)) if origin else None} for p in answer["places"]]
+        places.sort(key=lambda p: p["metres"] if p["metres"] is not None else 0)
+        return {"ok": True, "places": places, "done": answer["done"]}

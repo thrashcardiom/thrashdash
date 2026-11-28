@@ -56,6 +56,8 @@ export const api = {
   /** Ask the game to set the route through these stops ([{lat, lon, name?}], the last the destination). Rejects with the game's reason. */
   setRoute: (stops) => call("POST", "/api/route", { stops }),
   clearRoute: () => call("DELETE", "/api/route"),
+  /** Filling stations and chargers near the car: {places: [{name, kind, lat, lon, metres}], done}. Rejects with why not. */
+  findFuel: () => call("POST", "/api/route/fuel"),
   listDestinations: () => call("GET", "/api/destinations"),
   saveDestination: (name, lat, lon) => call("POST", "/api/destinations", { name, lat, lon }),
   deleteDestination: (id) => call("DELETE", `/api/destinations/${encodeURIComponent(id)}`),

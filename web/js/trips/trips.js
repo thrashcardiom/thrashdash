@@ -2058,6 +2058,13 @@ async function pollPlan() {
   }
 }
 
+/** Text for a map tooltip as an element: Leaflet would read a string as markup, and a place's name is somebody else's text. */
+function plain(text) {
+  const el = document.createElement("span");
+  el.textContent = text;
+  return el;
+}
+
 function drawPlanOnMap() {
   if (!map) return;
   plan.layer ??= L.layerGroup().addTo(map);
@@ -2072,8 +2079,8 @@ function drawPlanOnMap() {
   plan.layer.clearLayers();
   if (!show) return;
   L.polyline(s.points, { color: "#35c2ff", weight: 4, opacity: 0.85, dashArray: "2 9", lineCap: "round", interactive: false }).addTo(plan.layer);
-  for (const w of s.waypoints ?? []) L.circleMarker([w.lat, w.lon], { radius: 5, color: "#fff", weight: 2, fillColor: "#ffb020", fillOpacity: 1 }).bindTooltip(w.name || "Stop").addTo(plan.layer);
-  if (s.dest) L.circleMarker([s.dest.lat, s.dest.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#ff4d4d", fillOpacity: 1 }).bindTooltip(s.dest.name || "Destination").addTo(plan.layer);
+  for (const w of s.waypoints ?? []) L.circleMarker([w.lat, w.lon], { radius: 5, color: "#fff", weight: 2, fillColor: "#ffb020", fillOpacity: 1 }).bindTooltip(plain(w.name || "Stop")).addTo(plan.layer);
+  if (s.dest) L.circleMarker([s.dest.lat, s.dest.lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#ff4d4d", fillOpacity: 1 }).bindTooltip(plain(s.dest.name || "Destination")).addTo(plan.layer);
 }
 
 let idleTicks = 0;

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from thrashdash import PROTOCOL_VERSION  # noqa: E402
 from thrashdash.hub import GEO_TTL_S, Hub  # noqa: E402
 from thrashdash.paths import web_root  # noqa: E402
-from thrashdash.routeplan import MAX_DESTINATIONS, MAX_STOPS, DestinationStore, RoutePlanner, clean_place, clean_stops  # noqa: E402
+from thrashdash.routeplan import MAX_DESTINATIONS, MAX_STOPS, DestinationStore, FuelFinder, RoutePlanner, clean_place, clean_stops, metres_between  # noqa: E402
 from thrashdash.server import make_app  # noqa: E402
 from thrashdash.store import LayoutStore, NotFound, SettingsStore  # noqa: E402
 from thrashdash.tripnotice import TripNotices  # noqa: E402
@@ -125,6 +125,118 @@ class FakeNotices:
         if self.answer is not None:
             asyncio.get_running_loop().call_later(0.02, lambda: self.hub.ingest_packet({"v": V, "type": "georouteack", **self.answer}))
         return True
+
+
+LEGS = [[1000.0, 60.0], [2000.0, 120.0], [3000.0, 300.0]]  # start to stop 1, to stop 2, to the end
+
+
+class NextStopTests(unittest.TestCase):
+    def stop(self, remaining, ahead=2, legs=LEGS, **extra):
+        hub = car_hub()
+        hub.ingest_packet(progress(remaining=remaining, stops={"ahead": ahead, "legs": legs, **extra}))
+        channels = hub._geo_route[0]
+        return {k.rsplit(".", 1)[1]: v for k, v in channels.items() if k.startswith("geo.route.stop.")}
+
+    def test_the_first_stop_from_the_start(self):
+        self.assertEqual(self.stop(6000.0, name="Cafe"), {"distance": 1000.0, "eta": 60.0, "number": 1, "ahead": 2, "name": "Cafe"})
+
+    def test_part_way_along_a_leg_the_time_shrinks_with_the_distance(self):
+        self.assertEqual(self.stop(5750.0), {"distance": 750.0, "eta": 45.0, "number": 1, "ahead": 2})
+
+    def test_after_a_stop_is_passed_the_next_one_is_measured(self):
+        self.assertEqual(self.stop(4000.0, ahead=1), {"distance": 1000.0, "eta": 60.0, "number": 2, "ahead": 1})
+
+    def test_a_car_just_past_a_stop_not_yet_counted_is_at_it_not_behind_it(self):
+        self.assertEqual(self.stop(4990.0)["distance"], 0.0)
+
+    def test_nothing_without_stops_or_what_is_left(self):
+        hub = car_hub()
+        hub.ingest_packet(progress(remaining=500.0))
+        self.assertFalse([k for k in hub._geo_route[0] if ".stop." in k])
+        hub.ingest_packet({"v": V, "type": "georoute", "gps": {"stops": {"ahead": 1, "legs": LEGS}}})
+        self.assertFalse([k for k in hub._geo_route[0] if ".stop." in k])
+
+    def test_nonsense_and_a_stop_not_planned_yet_are_ignored(self):
+        for ahead, legs in ((0, LEGS), (3, LEGS), (1.5, LEGS), ("1", LEGS), (1, []), (1, LEGS[:1]), (1, [[1, 2], [3]]), (1, [[1, 2], [-3, 4]]), (1, "legs"), (1, [[1, 2]] * 30)):
+            self.assertEqual(self.stop(900.0, ahead=ahead, legs=legs), {}, (ahead, legs))
+
+    def test_a_leg_of_no_length_takes_no_time(self):
+        self.assertEqual(self.stop(10.0, ahead=1, legs=[[0.0, 5.0], [10.0, 5.0]])["eta"], 0.0)
+
+
+def found(number, places=None, done=True, **extra):
+    return {"v": V, "type": "geofuel", "id": number, "lat": -41.3, "lon": 174.8, "done": done,
+            "places": places if places is not None else [{"n": "Far", "kind": "fuel", "lat": -41.32, "lon": 174.8}, {"n": "Near", "kind": "charger", "lat": -41.301, "lon": 174.8}], **extra}
+
+
+class FuelNotices(FakeNotices):
+    """Answers a search the way the game would: `answers` are packets without their id, sent one after the other."""
+
+    def __init__(self, hub, answers=(), connected=True, wrong_number=False):
+        super().__init__(hub, None, connected)
+        self.answers, self.wrong_number = answers, wrong_number
+
+    def send_to_game(self, payload):
+        if not super().send_to_game(payload):
+            return False
+        for i, answer in enumerate(self.answers):
+            packet = {**answer, "id": payload["id"] + (1 if self.wrong_number else 0)}
+            asyncio.get_running_loop().call_later(0.02 + 0.1 * i, self.hub.ingest_packet, packet)
+        return True
+
+
+class FuelTests(unittest.IsolatedAsyncioTestCase):
+    async def search(self, wait_s=1.0, **notices):
+        hub = Hub()
+        game = FuelNotices(hub, **notices)
+        return await FuelFinder(game, hub, wait_s=wait_s).search(), game
+
+    async def test_the_places_come_back_nearest_first_with_how_far_they_are(self):
+        result, game = await self.search(answers=[found(0)])
+        self.assertEqual([p["name"] for p in result["places"]], ["Near", "Far"])
+        self.assertEqual([p["kind"] for p in result["places"]], ["charger", "fuel"])
+        self.assertTrue(100 < result["places"][0]["metres"] < 125 and 2200 < result["places"][1]["metres"] < 2240)
+        self.assertTrue(result["ok"] and result["done"])
+        self.assertEqual((game.sent[0]["type"], game.sent[0]["action"]), ("places", "fuel"))
+
+    async def test_it_waits_for_the_whole_answer(self):
+        result, _ = await self.search(answers=[found(0, places=[], done=False), found(0)])
+        self.assertTrue(result["done"])
+        self.assertEqual(len(result["places"]), 2)
+
+    async def test_after_the_wait_what_there_is_is_given_and_marked_unfinished(self):
+        result, _ = await self.search(wait_s=0.2, answers=[found(0, done=False)])
+        self.assertEqual((result["ok"], result["done"], len(result["places"])), (True, False, 2))
+
+    async def test_silence_a_reason_and_no_game(self):
+        result, _ = await self.search(wait_s=0.1)
+        self.assertEqual(result["ok"], False)
+        self.assertIn("did not answer", result["why"])
+        result, _ = await self.search(answers=[found(0, places=[], why="no map data")])
+        self.assertEqual(result, {"ok": False, "why": "The search failed: no map data."})
+        result, _ = await self.search(connected=False)
+        self.assertIn("not connected", result["why"])
+        self.assertFalse((await FuelFinder(None, Hub()).search())["ok"])
+
+    async def test_nothing_found_is_not_a_failure(self):
+        result, _ = await self.search(answers=[found(0, places=[])])
+        self.assertEqual((result["ok"], result["places"], result["done"]), (True, [], True))
+
+    async def test_an_answer_to_another_search_is_not_taken(self):
+        result, _ = await self.search(wait_s=0.15, answers=[found(0)], wrong_number=True)
+        self.assertFalse(result["ok"])
+
+    def test_only_named_places_on_earth_are_kept(self):
+        hub = Hub()
+        hub.ingest_packet(found(5, places=[{"n": "A\nB", "kind": "odd", "lat": 1, "lon": 2}, {"n": "", "lat": 1, "lon": 2}, {"lat": 1, "lon": 2}, {"n": "x", "lat": 99, "lon": 0}, "junk",
+                                          *({"n": f"P{i}", "lat": 1, "lon": 2} for i in range(60))]))
+        self.assertEqual(hub.fuel["places"][0], {"lat": 1.0, "lon": 2.0, "name": "A B", "kind": "fuel"})
+        self.assertLessEqual(len(hub.fuel["places"]), 30)
+        hub.ingest_packet({"v": V, "type": "geofuel", "id": "x"})
+        self.assertEqual((hub.stats["rejected_fuel"], hub.fuel["id"]), (1, 5))
+
+    def test_the_straight_line(self):
+        self.assertAlmostEqual(metres_between({"lat": 0, "lon": 0}, {"lat": 0.001, "lon": 0}), 111.2, delta=0.1)
 
 
 class PlannerTests(unittest.IsolatedAsyncioTestCase):
@@ -334,7 +446,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         self.destinations = DestinationStore(data / "destinations.json")
         self.port = free_port()
         app = make_app(self.hub, self.port, LayoutStore(data / "layouts", web_root() / "layouts"), SettingsStore(data / "settings.json"), notices=self.notices,
-                       route_planner=RoutePlanner(self.notices, self.hub), destinations=self.destinations)
+                       route_planner=RoutePlanner(self.notices, self.hub), destinations=self.destinations, fuel_finder=FuelFinder(self.notices, self.hub, wait_s=0.2))
         self.runner = web.AppRunner(app, access_log=None)
         await self.runner.setup()
         await web.TCPSite(self.runner, "127.0.0.1", self.port).start()
@@ -395,6 +507,24 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r.status, 403)
         self.assertEqual(self.notices.sent, [])
         self.assertEqual(self.destinations.list(), [])
+
+    async def test_searching_for_fuel(self):
+        game = FuelNotices(self.hub, [found(0)])
+        self.notices.send_to_game = game.send_to_game
+        async with self.http.post(f"{self.base}/route/fuel", headers=self.h) as r:
+            got = await r.json()
+            self.assertEqual((r.status, [p["name"] for p in got["places"]], got["done"]), (200, ["Near", "Far"], True))
+
+    async def test_a_search_that_fails_is_a_409_saying_why(self):
+        self.notices.connected = False
+        async with self.http.post(f"{self.base}/route/fuel", headers=self.h) as r:
+            self.assertEqual(r.status, 409)
+            self.assertIn("not connected", (await r.json())["error"])
+
+    async def test_a_search_needs_the_header_like_any_command_to_the_game(self):
+        async with self.http.post(f"{self.base}/route/fuel") as r:
+            self.assertEqual(r.status, 403)
+        self.assertEqual(self.notices.sent, [])
 
     async def test_saved_destinations(self):
         async with self.http.post(f"{self.base}/destinations", json={"name": "Home", "lat": -41.2865, "lon": 174.7762}, headers=self.h) as r:

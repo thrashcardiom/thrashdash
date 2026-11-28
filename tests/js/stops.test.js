@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MAX_STOPS, addStop, formatMinutes, metresBetween, moveStop, placesFromRoutes, removeStop, routeSummary, stopLabel, stopsSummary } from "../../web/js/trips/stops.js";
+import { MAX_STOPS, addStop, distanceText, formatMinutes, insertFirst, metresBetween, moveStop, placesFromRoutes, removeStop, routeSummary, routeToExtend, stopLabel, stopsSummary } from "../../web/js/trips/stops.js";
 import { buildPrefs } from "../../web/js/units.js";
 
 const km = buildPrefs({}, "");
@@ -103,4 +103,37 @@ test("the planned route in a line", () => {
   assert.equal(routeSummary({ active: true, dest: { name: "Cafe" }, remaining: 800, eta: 30 }, km), "Cafe: 0.8 km, under a minute left");
   assert.equal(routeSummary({ active: true }, km), "Route set");
   assert.equal(routeSummary({ active: true, remaining: 5000 }, km), "5.0 km");
+});
+
+test("a place can be put first, to be driven to next", () => {
+  const stops = [at(1000, 0), at(2000, 0)];
+  const got = insertFirst(stops, { ...at(500, 0), name: "Z" });
+  assert.equal(got.error, "");
+  assert.deepEqual(got.stops.map((s) => s.name), ["Z", undefined, undefined]);
+  assert.equal(stops.length, 2, "the list given is not changed");
+  assert.match(insertFirst(got.stops, at(500, 5)).error, /already the next stop/);
+  assert.match(insertFirst(stops, { lat: 99, lon: 0 }).error, /not a place/);
+  const full = Array.from({ length: MAX_STOPS }, (_, i) => at(i * 500 + 5000, 0));
+  assert.match(insertFirst(full, at(0, 0)).error, /11 stops/);
+  assert.equal(insertFirst(full, at(0, 0)).stops.length, MAX_STOPS);
+  assert.equal(insertFirst([], at(0, 0)).stops.length, 1);
+});
+
+test("a stop goes into the draft, or into what is left of the game's route when there is no draft or it was just sent", () => {
+  const plan = { active: true, name: "Home", waypoints: [{ ...at(100, 0), name: "Cafe" }, at(200, 0)], dest: at(300, 0) };
+  const draft = [at(900, 0)];
+  assert.equal(routeToExtend(draft, false, plan), draft);
+  for (const [given, sent] of [[[], false], [draft, true]]) {
+    assert.deepEqual(routeToExtend(given, sent, plan).map((s) => s.name), ["Cafe", undefined, "Home"]);
+  }
+  assert.equal(routeToExtend(draft, true, { active: false }), draft);
+  assert.equal(routeToExtend(draft, true, null), draft);
+  assert.deepEqual(routeToExtend([], false, { active: true }), []); // (a route whose line has not come yet has no destination to keep)
+});
+
+test("distances to places nearby, in the person's unit", () => {
+  assert.equal(distanceText(820, km), "0.8 km");
+  assert.equal(distanceText(12400, km), "12 km");
+  assert.equal(distanceText(1609.344, mi), "1.0 mi");
+  assert.equal(distanceText(null, km), "");
 });

@@ -1,6 +1,6 @@
 """ThrashDash relay: receives telemetry from the BeamNG mod over UDP and serves the dashboard."""
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 # Version of the UDP/WebSocket message schema. The Lua mod stamps every packet with "v";
 # the relay rejects packets whose version it does not understand instead of guessing, so a

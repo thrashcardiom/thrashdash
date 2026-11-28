@@ -14,6 +14,8 @@ look: a look only reads what it needs. Edit the arrangements here and re-run, ra
     health     tyres, body damage, brake temperatures and engine-state warning lamps
     drift      a big tach with shift light, gear digit, speed, throttle/brake bars and a throttle history
     telemetry  readouts plus six history graphs, for tuning and testing
+    navigation the live map, the route panel with its next turn, the speed limit sign and your speed (needs BeamNG.Earth)
+    trackday   the lap timer, a tach with shift light, G-force, speed, gear and pedal bars (laps need BeamNG.Earth and a circuit)
 """
 import json
 from pathlib import Path
@@ -225,7 +227,34 @@ def telemetry():
     return layout("Telemetry (graphs)", 1400, 700, b.widgets)
 
 
-TEMPLATES = {"cluster": cluster, "offroad": offroad, "minimal": minimal, "phone": phone, "drift": drift, "telemetry": telemetry, "health": health, "driver": driver, "trip": trip}
+def navigation():
+    """For a drive with a GPS route: the map, where to turn, how far is left, and the limit. Everything about the road comes from BeamNG.Earth."""
+    b = Builder()
+    b.add("tripmap", x=20, y=20, w=760, h=560, headUp=True, zoom=17, satellite=False)
+    b.add("route", x=800, y=20, w=340, h=420, label="Route", showNext=True, showName=True, showOff=True)
+    b.add("speedlimit", x=1160, y=20, w=220, h=270, speedChannel="wheelspeed", style="round", showSpeed=False)
+    b.add("gear", x=1160, y=300, w=220, h=100, channel="gear", label="", style="digit")
+    b.add("readout", x=800, y=460, w=340, h=120, channel="wheelspeed", kind="speed", label="SPEED", decimals=0, digits=3)
+    b.add("readout", x=1160, y=410, w=220, h=104, channel="fuel", kind="fraction", label="FUEL", decimals=0, digits=3)
+    lamp_row(b, ["left", "right", "engine", "park"], 1270, 528, size=46)
+    return layout("Navigation", 1400, 600, b.widgets)
+
+
+def trackday():
+    """For timed laps: this lap and the gap to your best, large, with the revs, gear and what your feet and the car are doing."""
+    b = Builder()
+    b.add("laptimer", x=20, y=20, w=440, h=520, label="Lap timer", showDelta=True, showSectors=True)
+    b.add("roundGauge", x=480, y=20, w=440, h=440, **TACH, shiftFrom=0.88)
+    b.add("gear", x=940, y=20, w=200, h=250, channel="gear", label="", style="digit")
+    b.add("gmeter", x=1160, y=20, w=220, h=250, label="G-force", range=1.5, showTrail=True)
+    b.add("readout", x=940, y=290, w=440, h=150, channel="wheelspeed", kind="speed", label="SPEED", decimals=0, digits=3)
+    b.add("bar", x=940, y=460, w=440, h=36, channel="throttle", kind="fraction", label="THR", min=0, max=100, segments=24)
+    b.add("bar", x=940, y=504, w=440, h=36, channel="brake", kind="fraction", label="BRK", min=0, max=100, segments=24)
+    lamp_row(b, ["engine", "oil", "abs", "esc", "park"], 700, 485)
+    return layout("Track day (lap timing)", 1400, 560, b.widgets)
+
+
+TEMPLATES = {"navigation": navigation, "trackday": trackday, "cluster": cluster, "offroad": offroad, "minimal": minimal, "phone": phone, "drift": drift, "telemetry": telemetry, "health": health, "driver": driver, "trip": trip}
 
 if __name__ == "__main__":
     for file, build in TEMPLATES.items():

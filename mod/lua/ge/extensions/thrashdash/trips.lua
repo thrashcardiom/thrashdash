@@ -54,6 +54,10 @@ local MAX_STEPS = 120
 local MAX_PATH_POINTS = 1500 -- the most points of the route's line sent to the maps (one datagram holds them; the relay takes as many)
 local THIN_FROM_M = 8 -- a longer line is simplified by shape, starting at this tolerance (m) and doubling until it fits
 local MAX_STOPS = 11 -- what BeamNG.Earth's gpsSetRoute takes: up to 10 stops on the way and the destination
+local MAX_FUEL = 15 -- the most filling stations and chargers one search sends back
+local FUEL_RADIUS_M = 3000 -- searched first (BeamNG.Earth reads the map round this far when asked)...
+local FUEL_WIDE_M = 25000 -- ...and, if that finds fewer than FUEL_ENOUGH, this far through the map data it already has
+local FUEL_ENOUGH = 3
 local STEP_KEYS = { "type", "modifier", "name" } -- text kept (cut short); "exit", "offset" and "distance" are numbers
 
 local udp
@@ -296,6 +300,22 @@ local function sendRoute(a, gps)
   send({ type = "geosteps", rt = clock, version = version, dist = type(route.dist) == "number" and route.dist or nil, steps = steps })
 end
 
+-- The stops still ahead of the destination, for the dashboard's "next stop": how many, the first one's name, and the planned
+-- route's legs as { metres, seconds } (from the start through each stop to the end). The relay works the distance out from them.
+local function stopsOf(gps)
+  if type(gps) ~= "table" or type(gps.waypoints) ~= "table" or #gps.waypoints < 1 or type(gps.legs) ~= "table" then return nil end
+  if #gps.legs < 2 or #gps.legs > MAX_STOPS then return nil end
+  local legs = {}
+  for i = 1, #gps.legs do
+    local leg = gps.legs[i]
+    if type(leg) ~= "table" or type(leg[1]) ~= "number" or type(leg[2]) ~= "number" then return nil end
+    legs[i] = { leg[1], leg[2] }
+  end
+  local first = gps.waypoints[1]
+  local name = type(first) == "table" and type(first.name) == "string" and first.name:sub(1, 60) or nil
+  return { ahead = #gps.waypoints, name = name, legs = legs }
+end
+
 local function takeInfo(withPlace, withSlow)
   local a = earth()
   if not a or call(a.ready) ~= true then return end
@@ -310,7 +330,9 @@ local function takeInfo(withPlace, withSlow)
   -- the trip log is not written to more often; and one that says "no route" when there is none, because for the dashboard silence
   -- would be ambiguous.
   local gps = call(a.gps)
-  send({ type = "georoute", rt = clock, gps = pick(gps, ROUTE_KEYS) })
+  local progress = pick(gps, ROUTE_KEYS)
+  if progress then progress.stops = stopsOf(gps) end
+  send({ type = "georoute", rt = clock, gps = progress })
   if type(gps) == "table" and gps.routeVersion ~= nil then
     if gps.routeVersion ~= stepsVersion or clock - stepsAt >= STEPS_S then sendRoute(a, gps) end
   else
@@ -373,6 +395,65 @@ local function applyRoute(msg)
   return ack(false, type(why) == "string" and why or "BeamNG.Earth did not take the route")
 end
 
+-- ---- filling stations and chargers nearby, asked for by ThrashDash ---------------------------------------------------------
+
+-- The named, open places of a search answer, as the relay takes them. BeamNG.Earth gives them nearest first.
+local function fuelRows(result)
+  local rows = {}
+  if type(result) ~= "table" or type(result.places) ~= "table" then return rows end
+  for _, place in ipairs(result.places) do
+    if type(place) == "table" and type(place.name) == "string" and place.name ~= "" and type(place.lat) == "number" and type(place.lon) == "number"
+        and place.open ~= "permanently_closed" and place.open ~= "temporarily_closed" then
+      local words = (tostring(place.category or "") .. " " .. place.name):lower() -- (some chargers are filed as filling stations)
+      rows[#rows + 1] = { n = place.name:sub(1, 60), kind = words:find("charg", 1, true) and "charger" or "fuel", lat = place.lat, lon = place.lon }
+      if #rows >= MAX_FUEL then break end
+    end
+  end
+  return rows
+end
+
+local fuelSearch = 0 -- the number of the newest search: answers to an older one are dropped
+
+local function findFuel(id)
+  fuelSearch = id
+  local lat, lon
+  local function reply(rows, done, why)
+    if fuelSearch ~= id then return end
+    send({ type = "geofuel", rt = clock, id = id, lat = lat, lon = lon, places = rows, done = done, why = why })
+  end
+  local a = earth()
+  if not a then return reply({}, true, "BeamNG.Earth's level is not loaded") end
+  if type(a.places) ~= "function" or call(a.has, "places") ~= true then return reply({}, true, "this BeamNG.Earth cannot search for places") end
+  local pose = call(a.pose)
+  if type(pose) ~= "table" or not pose.lat or not pose.lon then return reply({}, true, "where the car is is not known yet") end
+  lat, lon = pose.lat, pose.lon
+
+  -- Ask once. `answer` is called for each answer BeamNG.Earth gives; a search it will not take answers at once with why.
+  local function ask(radius, cachedOnly, answer)
+    local ok, request, why = pcall(a.places, lat, lon, { radius = radius, categories = { "group:fuel" }, limit = MAX_FUEL, cachedOnly = cachedOnly }, answer)
+    if not ok or not request then answer({ places = {}, error = tostring((ok and why) or request) }) end
+  end
+
+  local finished = false
+  ask(FUEL_RADIUS_M, nil, function(near)
+    if finished or type(near) ~= "table" then return end
+    local rows = fuelRows(near)
+    if near.pending then return reply(rows, false) end -- (more of the map is being fetched: a second answer comes)
+    finished = true
+    if #rows >= FUEL_ENOUGH or call(a.has, "cachedPlaces") ~= true then
+      return reply(rows, true, #rows == 0 and near.error or nil)
+    end
+    local answered = false
+    ask(FUEL_WIDE_M, true, function(wide)
+      if answered or type(wide) ~= "table" then return end
+      answered = true
+      local further = fuelRows(wide)
+      local best = #further > #rows and further or rows
+      reply(best, true, #best == 0 and (wide.error or near.error) or nil)
+    end)
+  end)
+end
+
 local function receiveMessages()
   if not udp then return end
   for _ = 1, MAX_PER_FRAME do
@@ -382,6 +463,8 @@ local function receiveMessages()
       local decoded = call(jsonDecode, data)
       if type(decoded) == "table" and decoded.type == "route" then
         pcall(applyRoute, decoded)
+      elseif type(decoded) == "table" and decoded.type == "places" and decoded.action == "fuel" and type(decoded.id) == "number" then
+        pcall(findFuel, decoded.id)
       elseif type(decoded) == "table" and decoded.type == "toast" and type(decoded.msg) == "string" then
         local title = type(decoded.title) == "string" and decoded.title or "ThrashDash"
         local seconds = tonumber(decoded.seconds)

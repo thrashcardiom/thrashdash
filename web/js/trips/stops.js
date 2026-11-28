@@ -44,6 +44,33 @@ export function addStop(stops, place) {
   return { stops: [...stops, stop], error: "" };
 }
 
+/**
+ * The stops with `place` put first, to be driven to next (a filling station on the way). Not added (and `error` says why) when the route
+ * is full, the place is not a place, or it is the next stop already.
+ * @returns {{stops: object[], error: string}}
+ */
+export function insertFirst(stops, place) {
+  if (stops.length && valid(place) && metresBetween(stops[0], place) < NEAR_M) return { stops, error: "That is already the next stop." };
+  const got = addStop([], place);
+  if (got.error) return { stops, error: got.error };
+  if (stops.length >= MAX_STOPS) return { stops, error: `A route can have ${MAX_STOPS} stops, the last the destination: take one away first.` };
+  return { stops: [...got.stops, ...stops], error: "" };
+}
+
+/**
+ * The route a stop is to be put into. A draft the person is working on is kept; with no draft, or one already sent and not touched since,
+ * it is what is left of the route in the game (stops already passed are gone from that), when one is set.
+ * @param {object[]} draft the page's stops
+ * @param {boolean} sent whether the draft is just what was last sent
+ * @param {object | null} plan GET /api/route
+ */
+export function routeToExtend(draft, sent, plan) {
+  if (draft.length && !sent) return draft;
+  if (!plan?.active || !valid(plan.dest)) return draft;
+  const place = (p, name) => ({ lat: p.lat, lon: p.lon, ...(tidy(p.name || name) ? { name: tidy(p.name || name) } : {}) });
+  return [...(plan.waypoints ?? []).filter(valid).map((w) => place(w)), place(plan.dest, plan.name)];
+}
+
 export function removeStop(stops, index) {
   return stops.filter((_, i) => i !== index);
 }
@@ -95,6 +122,13 @@ export function placesFromRoutes(routes, limit = MAX_PLACES) {
     }
   }
   return out;
+}
+
+/** How far off a place found nearby is, in a straight line, in the person's unit: "0.8 km", "12 km". Empty when unknown. */
+export function distanceText(metres, prefs) {
+  if (!Number.isFinite(metres)) return "";
+  const unit = resolveUnit("distance", prefs ?? {});
+  return `${nice(unit.convert(metres))} ${unit.label}`;
 }
 
 /** The planned route in a line: "Home: 1.1 km, 5 min left" (the destination, the distance and the time left, as far as they are known). */
